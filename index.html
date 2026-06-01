@@ -4,19 +4,287 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>DiveVis</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:100%;height:100%;overflow:hidden;background:#050d1a;font-family:'DM Mono',monospace}
-#app{display:flex;width:100%;height:100%;position:relative}
-#sidebar{width:280px;min-width:280px;height:100%;background:linear-gradient(180deg,#06101f 0%,#050d1a 100%);border-right:1px solid rgba(79,195,247,.1);display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+#app{display:flex;width:100%;height:100%}
+#sidebar{width:280px;min-width:280px;height:100%;background:linear-gradient(180deg,#06101f,#050d1a);border-right:1px solid rgba(79,195,247,.1);display:flex;flex-direction:column;overflow-y:auto;z-index:1000;flex-shrink:0;transition:width .3s,min-width .3s;scrollbar-width:thin;scrollbar-color:rgba(79,195,247,.1) transparent}
 #sidebar.closed{width:0;min-width:0;overflow:hidden}
-#tog{position:absolute;top:50%;transform:translateY(-50%);z-index:200;background:#06101f;border:1px solid rgba(79,195,247,.18);border-left:none;color:#4fc3f7;width:20px;height:52px;cursor:pointer;text-align:center;font-size:18px}
-#tog:hover{background:rgba(79,195,247,.08)}
-.logo{padding:20px 18px 13px;border-bottom:1px solid rgba(79,195,247,.07);white-space:nowrap}
+#tog{position:fixed;top:50%;transform:translateY(-50%);z-index:2000;background:#06101f;border:1px solid rgba(79,195,247,.2);border-left:none;color:#4fc3f7;width:20px;height:52px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;border-radius:0 7px 7px 0;transition:left .3s;left:280px}
+#tog:hover{background:rgba(79,195,247,.1)}
+.logo{padding:20px 18px 13px;border-bottom:1px solid rgba(79,195,247,.07)}
 .logo-t{font-family:'Syne',sans-serif;font-weight:800;font-size:23px;color:#fff;letter-spacing:-1px}
 .logo-t span{color:#4fc3f7}
 .logo-s{font-size:9px;color:rgba(255,255,255,.25);letter-spacing:2.5px;text-transform:uppercase;margin-top:4px}
-.sec{padding:13px 18px;border-bottom:1px solid rgba(79,195,247,.06);white-space:nowrap}
+.sec{padding:13px 18px;border-bottom:1px solid rgba(79,195,247,.06)}
 .slbl{font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(255,255,255,.22);margin-bottom:9px}
-#date-in{width:100%;background:rgba(79,195,247,.04);border:1px solid rgba(79,195,247,.16);border-radius:6px;color:#4fc3f7;font-family:'DM Mono',monospace;font-size:12px;padding:8px 10px;outline:no...
+#date-in{width:100%;background:rgba(79,195,247,.04);border:1px solid rgba(79,195,247,.16);border-radius:6px;color:#4fc3f7;font-family:'DM Mono',monospace;font-size:12px;padding:8px 10px;outline:none;color-scheme:dark}
+.date-row{display:flex;gap:5px;margin-top:7px}
+.dstep{flex:1;background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.15);border-radius:5px;color:#4fc3f7;font-family:'DM Mono',monospace;font-size:11px;padding:6px 4px;cursor:pointer;text-align:center}
+.dstep:hover{background:rgba(79,195,247,.15)}
+.dnote{font-size:9px;color:rgba(255,255,255,.18);margin-top:6px;line-height:1.5}
+#loc-btn{width:100%;background:rgba(79,195,247,.07);border:1px solid rgba(79,195,247,.2);border-radius:6px;color:#4fc3f7;font-family:'DM Mono',monospace;font-size:11px;padding:8px 10px;cursor:pointer;display:flex;align-items:center;gap:8px}
+#loc-btn:hover{background:rgba(79,195,247,.14)}
+#loc-status{font-size:9px;color:rgba(255,255,255,.25);margin-top:5px;min-height:13px}
+.lcard{border-radius:7px;overflow:hidden;border:1px solid rgba(255,255,255,.04);margin-bottom:6px}
+.lcard.on{border-color:rgba(79,195,247,.2)}
+.ltog{display:flex;align-items:center;gap:9px;padding:9px 10px;cursor:pointer;background:rgba(255,255,255,.02)}
+.ltog:hover{background:rgba(255,255,255,.05)}
+.ldot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.lcard.on .ldot{box-shadow:0 0 6px var(--c)}
+.li{flex:1}
+.ln{font-family:'Syne',sans-serif;font-size:12px;color:#fff}
+.ls{font-size:9px;color:rgba(255,255,255,.28);margin-top:1px}
+.lck{width:16px;height:16px;border-radius:3px;border:1.5px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;font-weight:700}
+.lcard.on .lck{background:#4fc3f7;border-color:#4fc3f7;color:#050d1a}
+.oprow{padding:5px 10px 9px;background:rgba(0,0,0,.12)}
+.oplbl{font-size:8px;color:rgba(255,255,255,.18);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:3px}
+input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
+.leg{margin-bottom:12px}
+.leg-t{font-size:9px;color:rgba(255,255,255,.4);margin-bottom:3px;font-family:'Syne',sans-serif}
+.leg-bar{height:7px;border-radius:3px;margin-bottom:3px}
+.leg-tk{display:flex;justify-content:space-between;font-size:8px;color:rgba(255,255,255,.22)}
+.leg-d{font-size:9px;color:rgba(255,255,255,.18);margin-top:3px;line-height:1.4}
+.ptinfo{margin:10px 18px;background:rgba(79,195,247,.04);border:1px solid rgba(79,195,247,.12);border-radius:6px;padding:8px 10px}
+.ptlbl{font-size:8px;color:rgba(255,255,255,.22);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:3px}
+.ptval{font-size:12px;color:#4fc3f7}
+.srclist{font-size:9px;color:rgba(255,255,255,.18);line-height:1.9}
+#map{flex:1;height:100%}
+.leaflet-container{background:#0a1628}
+.leaflet-control-zoom a{background:rgba(5,13,26,.9)!important;color:#4fc3f7!important;border-color:rgba(79,195,247,.2)!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div class="logo">
+      <div class="logo-t">DIVE<span>VIS</span></div>
+      <div class="logo-s">NSW East Coast · Australia</div>
+    </div>
+    <div class="sec">
+      <div class="slbl">Satellite Date</div>
+      <input type="date" id="date-in"/>
+      <div class="date-row">
+        <button class="dstep" onclick="stepDate(-7)">← 7d</button>
+        <button class="dstep" onclick="stepDate(-1)">← 1d</button>
+        <button class="dstep" onclick="stepDate(1)">1d →</button>
+        <button class="dstep" onclick="stepDate(7)">7d →</button>
+      </div>
+      <div class="dnote">SST always shows data. Chlorophyll gaps = cloud cover or no satellite pass that day.</div>
+    </div>
+    <div class="sec">
+      <div class="slbl">Your Location</div>
+      <button id="loc-btn" onclick="locateMe()"><span>◎</span><span id="loc-btn-txt">Jump to my location</span></button>
+      <div id="loc-status"></div>
+    </div>
+    <div class="sec">
+      <div class="slbl">Data Layers</div>
+      <div id="lyrs"></div>
+    </div>
+    <div class="sec" id="leg-sec" style="display:none">
+      <div class="slbl">Legend</div>
+      <div id="leg-inner"></div>
+    </div>
+    <div id="pt-wrap"></div>
+    <div class="sec" style="margin-top:auto">
+      <div class="slbl">Data Sources</div>
+      <div class="srclist">Esri World Imagery (base)<br>NASA GIBS / Earthdata<br>MODIS Aqua Chlorophyll<br>VIIRS SNPP Chlorophyll<br>GHRSST MUR SST (cloud-free)</div>
+    </div>
+  </div>
+  <button id="tog">◀</button>
+  <div id="map"></div>
+</div>
+<script>
+// ── Config ────────────────────────────────────────────────────
+function fmtDate(d){return d.toISOString().split('T')[0];}
+const todayStr=fmtDate(new Date(Date.now()-864e5*2));
+let currentDate=fmtDate(new Date(Date.now()-864e5*3));
+
+const LAYER_DEFS=[
+  {id:'chlorophyll',label:'Chlorophyll (MODIS)',sub:'MODIS Aqua · daily swath',color:'#66bb6a',
+   gibsLayer:'MODIS_Aqua_L2_Chlorophyll_A',matrix:'2km',fmt:'png',on:false,opacity:0.85},
+  {id:'sst',label:'Sea Temp (SST)',sub:'GHRSST MUR · gap-filled daily',color:'#ef5350',
+   gibsLayer:'GHRSST_L4_MUR_Sea_Surface_Temperature',matrix:'1km',fmt:'png',on:false,opacity:0.72},
+  {id:'viirs',label:'Chlorophyll (VIIRS)',sub:'VIIRS SNPP · daily swath',color:'#ffa726',
+   gibsLayer:'VIIRS_SNPP_L2_Chlorophyll_A',matrix:'2km',fmt:'png',on:false,opacity:0.82},
+];
+
+const LEGENDS={
+  chlorophyll:{title:'Chlorophyll-a (mg/m³)',desc:'Blue = clear. Green/red = more phytoplankton = lower vis.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
+  sst:{title:'Sea Surface Temp (°C)',desc:'Cold upwellings often reduce underwater visibility.',grad:'linear-gradient(to right,#0d0060,#0000ff,#00b4ff,#00ffff,#ffff00,#ff8000,#ff0000)',ticks:['<12°C','16°C','20°C','24°C','>28°C']},
+  viirs:{title:'Chlorophyll-a VIIRS (mg/m³)',desc:'Blue = clear. Green/red = more phytoplankton = lower vis.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
+};
+
+// ── Leaflet map ───────────────────────────────────────────────
+const map = L.map('map',{center:[-32.5,152.5],zoom:7,zoomControl:true});
+
+// Base layer - Esri satellite
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+  attribution:'Esri',maxZoom:19
+}).addTo(map);
+
+// Click for coords
+let clickCoords=null;
+map.on('click',function(e){
+  clickCoords={lat:e.latlng.lat.toFixed(4),lng:e.latlng.lng.toFixed(4)};
+  renderPtInfo();
+});
+
+// ── GIBS layers ───────────────────────────────────────────────
+// Build GIBS WMTS URL using the correct epsg4326 endpoint
+// NASA GIBS officially supports Leaflet - this is the correct approach
+function makeGIBSLayer(def){
+  const url=`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${def.gibsLayer}/default/${currentDate}/GoogleMapsCompatible/{z}/{y}/{x}.${def.fmt}`;
+  return L.tileLayer(url,{
+    attribution:'NASA GIBS',
+    tileSize:256,
+    opacity:def.opacity,
+    maxZoom:9,
+    maxNativeZoom:9,
+    crossOrigin:true,
+  });
+}
+
+const leafletLayers={};
+
+function addLayer(def){
+  if(leafletLayers[def.id]) return;
+  const l=makeGIBSLayer(def);
+  l.addTo(map);
+  leafletLayers[def.id]=l;
+}
+
+function removeLayer(def){
+  if(!leafletLayers[def.id]) return;
+  map.removeLayer(leafletLayers[def.id]);
+  delete leafletLayers[def.id];
+}
+
+function refreshDates(){
+  LAYER_DEFS.forEach(def=>{
+    if(!leafletLayers[def.id]) return;
+    map.removeLayer(leafletLayers[def.id]);
+    delete leafletLayers[def.id];
+    addLayer(def);
+    leafletLayers[def.id].setOpacity(def.opacity);
+  });
+}
+
+// ── Date ──────────────────────────────────────────────────────
+function stepDate(days){
+  const d=new Date(currentDate);d.setDate(d.getDate()+days);
+  const s=fmtDate(d);if(s>todayStr)return;
+  currentDate=s;
+  document.getElementById('date-in').value=s;
+  document.getElementById('bdg-date').textContent=s;
+  refreshDates();
+}
+
+// ── Geolocation ───────────────────────────────────────────────
+let userMarker=null;
+function locateMe(){
+  if(!navigator.geolocation){setLocStatus('Not available.');return;}
+  setLocStatus('Locating…');
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const{latitude:lat,longitude:lng,accuracy}=pos.coords;
+    map.setView([lat,lng],11);
+    if(userMarker) map.removeLayer(userMarker);
+    userMarker=L.circleMarker([lat,lng],{radius:8,fillColor:'#4fc3f7',color:'#fff',weight:2.5,fillOpacity:1}).addTo(map);
+    setLocStatus(`📍 ${Math.abs(lat).toFixed(3)}°${lat<0?'S':'N'} ${Math.abs(lng).toFixed(3)}°E (±${Math.round(accuracy)}m)`);
+  },err=>{
+    const m={1:'Access denied.',2:'Unavailable.',3:'Timed out.'};
+    setLocStatus(m[err.code]||'Error.');
+  },{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
+}
+function setLocStatus(msg){document.getElementById('loc-status').textContent=msg;}
+
+// ── Sidebar toggle ────────────────────────────────────────────
+let sidebarOpen=true;
+const togBtn=document.getElementById('tog');
+const sidebar=document.getElementById('sidebar');
+togBtn.addEventListener('click',()=>{
+  sidebarOpen=!sidebarOpen;
+  sidebar.classList.toggle('closed',!sidebarOpen);
+  togBtn.style.left=(sidebarOpen?280:0)+'px';
+  togBtn.textContent=sidebarOpen?'◀':'▶';
+  setTimeout(()=>map.invalidateSize(),320);
+});
+
+// ── UI render ─────────────────────────────────────────────────
+function renderLayers(){
+  document.getElementById('lyrs').innerHTML=LAYER_DEFS.map(def=>`
+    <div class="lcard ${def.on?'on':''}">
+      <div class="ltog" onclick="toggleLayer('${def.id}')">
+        <div class="ldot" style="background:${def.color};--c:${def.color}"></div>
+        <div class="li"><div class="ln">${def.label}</div><div class="ls">${def.sub}</div></div>
+        <div class="lck">${def.on?'✓':''}</div>
+      </div>
+      ${def.on?`<div class="oprow"><div class="oplbl">Opacity</div>
+        <input type="range" min="0.1" max="1" step="0.05" value="${def.opacity}"
+          oninput="setOp('${def.id}',+this.value)"></div>`:''}
+    </div>`).join('');
+}
+
+function renderLegend(){
+  const sec=document.getElementById('leg-sec');
+  const active=LAYER_DEFS.filter(d=>d.on&&LEGENDS[d.id]);
+  if(!active.length){sec.style.display='none';return;}
+  sec.style.display='';
+  document.getElementById('leg-inner').innerHTML=active.map(def=>{
+    const l=LEGENDS[def.id];
+    return `<div class="leg">
+      <div class="leg-t">${l.title}</div>
+      <div class="leg-bar" style="background:${l.grad}"></div>
+      <div class="leg-tk">${l.ticks.map(t=>`<span>${t}</span>`).join('')}</div>
+      <div class="leg-d">${l.desc}</div></div>`;
+  }).join('');
+}
+
+function renderPtInfo(){
+  const w=document.getElementById('pt-wrap');
+  if(!clickCoords){w.innerHTML='';return;}
+  const lat=parseFloat(clickCoords.lat),lng=parseFloat(clickCoords.lng);
+  w.innerHTML=`<div class="ptinfo"><div class="ptlbl">Selected Point</div>
+    <div class="ptval">${Math.abs(lat).toFixed(4)}°${lat<0?'S':'N'} &nbsp;${Math.abs(lng).toFixed(4)}°${lng>0?'E':'W'}</div></div>`;
+}
+
+function renderAll(){renderLayers();renderLegend();renderPtInfo();}
+
+window.toggleLayer=function(id){
+  const def=LAYER_DEFS.find(d=>d.id===id);
+  def.on=!def.on;
+  if(def.on) addLayer(def); else removeLayer(def);
+  renderAll();
+};
+
+window.setOp=function(id,v){
+  const def=LAYER_DEFS.find(d=>d.id===id);
+  def.opacity=v;
+  if(leafletLayers[id]) leafletLayers[id].setOpacity(v);
+};
+
+window.stepDate=stepDate;
+
+// ── Date input ────────────────────────────────────────────────
+const dateIn=document.getElementById('date-in');
+dateIn.value=currentDate;dateIn.max=todayStr;dateIn.min='2020-01-01';
+dateIn.addEventListener('change',e=>{
+  currentDate=e.target.value;
+  document.getElementById('bdg-date').textContent=currentDate;
+  refreshDates();
+});
+
+// ── Date badge ────────────────────────────────────────────────
+const badge=document.createElement('div');
+badge.style.cssText='position:fixed;top:12px;right:12px;z-index:1000;background:rgba(5,13,26,.9);border:1px solid rgba(79,195,247,.2);border-radius:7px;padding:7px 12px;font-family:DM Mono,monospace;pointer-events:none';
+badge.innerHTML=`<strong id="bdg-date" style="display:block;font-family:Syne,sans-serif;font-size:12px;color:#4fc3f7">${currentDate}</strong><span style="font-size:9px;color:rgba(255,255,255,.3)">Satellite imagery date</span>`;
+document.body.appendChild(badge);
+
+// ── Boot ──────────────────────────────────────────────────────
+renderAll();
+</script>
+</body>
+</html>
