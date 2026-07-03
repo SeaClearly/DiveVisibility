@@ -206,7 +206,8 @@ function removeNasaTiles(){
 function buildUrl(cfg,tx,ty,tz){
   if(cfg.proxy && PROXY){
     // Route through Cloudflare Worker to bypass CORS
-    return PROXY+'?layer='+cfg.gibsLayer+'&date='+curDate+'&z='+tz+'&y='+ty+'&x='+tx+'&tms='+cfg.tms+'&fmt='+cfg.fmt;
+    var mode = cfg.wms ? 'wms' : 'wmts';
+    return PROXY+'?layer='+cfg.gibsLayer+'&date='+curDate+'&z='+tz+'&y='+ty+'&x='+tx+'&tms='+cfg.tms+'&fmt='+cfg.fmt+'&mode='+mode;
   }
   return cfg.url
     .replace('{z}',tz).replace('{y}',ty).replace('{x}',tx)
