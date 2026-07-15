@@ -93,7 +93,7 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
     <div id="pt-wrap"></div>
     <div class="sec" style="margin-top:auto">
       <div class="slbl">Data Sources</div>
-      <div class="srclist">Esri World Imagery<br>NASA GIBS WMS · MODIS Aqua<br>NASA GIBS WMS · VIIRS SNPP<br>GHRSST MUR SST (gap-filled)<br>NASA GIBS / Earthdata</div>
+      <div class="srclist">Esri World Imagery<br>NASA GIBS WMS · MODIS Aqua<br>NASA GIBS WMS · VIIRS SNPP<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>NASA GIBS / Earthdata</div>
     </div>
   </div>
   <button id="tog">&#9664;</button>
@@ -141,6 +141,12 @@ var LAYERS = [
     color:'#29b6f6', on:false, opacity:1.0, maxZ:9, type:'wmts',
     url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg'
   },
+  {
+    id:'imos_chlor', label:'Chlorophyll (IMOS)', sub:'IMOS · Australian coastal · high res',
+    color:'#00e676', on:false, opacity:0.85, maxZ:10, type:'wms',
+    wmsLayer:'IMOS/SRS/OC/gridded/aqua/P1D/{year}/{month}/A{datecompact}_chl_oc3.nc',
+    wmsName:'chl_oc3', wmsServer:'imos'
+  },
 ];
 
 var LEGENDS = {
@@ -148,12 +154,13 @@ var LEGENDS = {
   chlor_modis:{title:'Chlorophyll-a MODIS (mg/m3)',desc:'Blue=clear water. Green/yellow/red=more phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
   chlor_viirs:{title:'Chlorophyll-a VIIRS (mg/m3)',desc:'Blue=clear water. Green/yellow/red=more phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
   terra_tc:{title:'True Colour MODIS Terra',desc:'Raw satellite image. Green/brown water=phytoplankton. White=cloud cover.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#fff)',ticks:['Deep','','','','Cloud']},
+  imos_chlor:{title:'Chlorophyll IMOS (mg/m3)',desc:'Australian-specific processing. Higher coastal resolution. Blue=clear, green/yellow/red=phytoplankton=lower vis.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
 };
 
 // ── Date ──────────────────────────────────────────────────────
 function fmtDate(d){return d.toISOString().split('T')[0];}
-var todayStr=fmtDate(new Date(Date.now()-864e5*2));
-var curDate=fmtDate(new Date(Date.now()-864e5*3));
+var todayStr=fmtDate(new Date(Date.now()-864e5*1));
+var curDate=fmtDate(new Date(Date.now()-864e5*2));
 
 function stepDate(n){
   var d=new Date(curDate);d.setDate(d.getDate()+n);
@@ -193,6 +200,26 @@ function buildWmsUrl(layer,tx,ty,tz,date){
     '&SRS=EPSG:4326&BBOX='+bbox+'&TIME='+date;
 }
 
+// Build IMOS THREDDS WMS URL for Australian chlorophyll
+// IMOS serves daily files named by date: A{YYYYMMDD}_chl_oc3.nc
+function buildImosUrl(cfg,tx,ty,tz,date){
+  var bb=tile2bbox(tx,ty,tz);
+  var bbox=bb.west+','+bb.south+','+bb.east+','+bb.north;
+  var d=new Date(date);
+  var year=d.getUTCFullYear();
+  var month=String(d.getUTCMonth()+1).padStart(2,'0');
+  var day=String(d.getUTCDate()).padStart(2,'0');
+  var datecompact=year+''+month+''+day;
+  var ncfile='A'+datecompact+'_chl_oc3.nc';
+  var path='IMOS/SRS/OC/gridded/aqua/P1D/'+year+'/'+month+'/'+ncfile;
+  return 'https://thredds.aodn.org.au/thredds/wms/'+path+
+    '?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap'+
+    '&LAYERS=chl_oc3&STYLES=boxfill/occam_pastel-30'+
+    '&FORMAT=image/png&TRANSPARENT=true&WIDTH=512&HEIGHT=512'+
+    '&SRS=EPSG:4326&BBOX='+bbox+
+    '&COLORSCALERANGE=0.01,10&LOGSCALE=true';
+}
+
 var V={cx:152.5,cy:-32.5,z:7};
 var TS=256,drag=false,ds=null,dv=null,sideOpen=true;
 var clickCoords=null,userLL=null;
@@ -207,8 +234,10 @@ function clearOverlayTiles(){
 
 function buildUrl(cfg,tx,ty,tz){
   if(cfg.type==='wms'){
-    // Use 3-day composite to fill gaps from cloud cover
-    // WMS TIME parameter accepts date ranges: start/end
+    if(cfg.wmsServer==='imos'){
+      return buildImosUrl(cfg,tx,ty,tz,curDate);
+    }
+    // NASA GIBS WMS - use 3-day composite to fill gaps
     var d1=new Date(curDate);
     d1.setDate(d1.getDate()-1);
     var d2=new Date(curDate);
