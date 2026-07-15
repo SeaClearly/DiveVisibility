@@ -52,6 +52,7 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
 .srclist{font-size:9px;color:rgba(255,255,255,.18);line-height:1.9}
 #mwrap{flex:1;height:100%;position:relative;overflow:hidden;min-width:0}
 #tiles{position:absolute;top:0;left:0;right:0;bottom:0;background:#0a1628;cursor:grab;overflow:hidden}
+#tiles img[data-overlay]{image-rendering:auto;image-rendering:smooth;}
 #tiles:active{cursor:grabbing}
 #loadbar{position:absolute;top:0;left:0;right:0;height:2px;z-index:20;overflow:hidden;display:none}
 #loadbar.on{display:block}
@@ -80,7 +81,7 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
         <button class="dstep" onclick="stepDate(1)">1d &#8594;</button>
         <button class="dstep" onclick="stepDate(7)">7d &#8594;</button>
       </div>
-      <div class="dnote">SST always shows. True Colour shows cloud cover. Chlorophyll needs proxy.</div>
+      <div class="dnote">Chlorophyll gaps = cloud cover or no satellite pass. SST always loads.</div>
     </div>
     <div class="sec">
       <div class="slbl">Your Location</div>
@@ -92,7 +93,7 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
     <div id="pt-wrap"></div>
     <div class="sec" style="margin-top:auto">
       <div class="slbl">Data Sources</div>
-      <div class="srclist">Esri World Imagery<br>MODIS Terra/Aqua True Colour<br>VIIRS NOAA-20 True Colour<br>GHRSST MUR SST (gap-filled)<br>MODIS/VIIRS Chlorophyll (via proxy)<br>NASA GIBS / Earthdata</div>
+      <div class="srclist">Esri World Imagery<br>NASA GIBS WMS · MODIS Aqua<br>NASA GIBS WMS · VIIRS SNPP<br>GHRSST MUR SST (gap-filled)<br>NASA GIBS / Earthdata</div>
     </div>
   </div>
   <button id="tog">&#9664;</button>
@@ -110,63 +111,43 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
   </div>
 </div>
 <script>
-// ── PROXY CONFIG ──────────────────────────────────────────────
-// Cloudflare Worker URL — routes NASA chlorophyll tiles through a CORS proxy
-var PROXY = 'https://divevis-proxy.supaskua217.workers.dev';
-
-// ── LAYER CONFIG ──────────────────────────────────────────────
+// ── Layer config ──────────────────────────────────────────────
+// Chlorophyll uses NASA GIBS WMS directly — confirmed working in browser tests
+// WMS v1.1.1 with SRS=EPSG:4326 and bbox in lon,lat order
+// No authentication required for WMS endpoint
 var LAYERS = [
   {
     id:'satellite', label:'Satellite Imagery', sub:'Esri World Imagery',
-    color:'#4fc3f7', on:true, opacity:1, maxZ:19, nasa:false, proxy:false,
-    url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    gibsLayer:'', tms:'', fmt:''
+    color:'#4fc3f7', on:true, opacity:1, maxZ:19, type:'xyz',
+    url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
   },
   {
-    id:'sst', label:'Sea Temp (SST)', sub:'GHRSST MUR 1km · always loads',
-    color:'#ef5350', on:false, opacity:0.75, maxZ:7, nasa:true, proxy:false,
-    url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GHRSST_L4_MUR_Sea_Surface_Temperature/default/{date}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png',
-    gibsLayer:'GHRSST_L4_MUR_Sea_Surface_Temperature', tms:'GoogleMapsCompatible_Level7', fmt:'png'
+    id:'sst', label:'Sea Temp (SST)', sub:'GHRSST MUR · gap-filled daily',
+    color:'#ef5350', on:false, opacity:0.75, maxZ:7, type:'wmts',
+    url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GHRSST_L4_MUR_Sea_Surface_Temperature/default/{date}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png'
   },
   {
-    id:'terra', label:'True Colour (Terra)', sub:'MODIS Terra · cloud cover visible',
-    color:'#4fc3f7', on:false, opacity:1.0, maxZ:9, nasa:true, proxy:false,
-    url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg',
-    gibsLayer:'MODIS_Terra_CorrectedReflectance_TrueColor', tms:'GoogleMapsCompatible_Level9', fmt:'jpg'
+    id:'chlor_modis', label:'Chlorophyll (MODIS)', sub:'MODIS Aqua · daily swath',
+    color:'#66bb6a', on:false, opacity:0.85, maxZ:9, type:'wms',
+    wmsLayer:'MODIS_Aqua_L2_Chlorophyll_A'
   },
   {
-    id:'aqua', label:'True Colour (Aqua)', sub:'MODIS Aqua · second daily pass',
-    color:'#29b6f6', on:false, opacity:1.0, maxZ:9, nasa:true, proxy:false,
-    url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Aqua_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg',
-    gibsLayer:'MODIS_Aqua_CorrectedReflectance_TrueColor', tms:'GoogleMapsCompatible_Level9', fmt:'jpg'
+    id:'chlor_viirs', label:'Chlorophyll (VIIRS)', sub:'VIIRS SNPP · daily swath',
+    color:'#ffa726', on:false, opacity:0.85, maxZ:9, type:'wms',
+    wmsLayer:'VIIRS_SNPP_L2_Chlorophyll_A'
   },
   {
-    id:'viirs', label:'True Colour (VIIRS)', sub:'VIIRS NOAA-20 · sharpest res',
-    color:'#ab47bc', on:false, opacity:1.0, maxZ:9, nasa:true, proxy:false,
-    url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg',
-    gibsLayer:'VIIRS_NOAA20_CorrectedReflectance_TrueColor', tms:'GoogleMapsCompatible_Level9', fmt:'jpg'
-  },
-  {
-    id:'chlor_modis', label:'Chlorophyll (MODIS)', sub:'MODIS Aqua L2 · via proxy',
-    color:'#66bb6a', on:false, opacity:0.85, maxZ:6, nasa:true, proxy:true,
-    url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Aqua_L2_Chlorophyll_A/default/{date}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png',
-    gibsLayer:'MODIS_Aqua_L2_Chlorophyll_A', tms:'GoogleMapsCompatible_Level6', fmt:'png'
-  },
-  {
-    id:'chlor_viirs', label:'Chlorophyll (VIIRS)', sub:'VIIRS SNPP L2 · via proxy',
-    color:'#ffa726', on:false, opacity:0.85, maxZ:6, nasa:true, proxy:true,
-    url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_L2_Chlorophyll_A/default/{date}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png',
-    gibsLayer:'VIIRS_SNPP_L2_Chlorophyll_A', tms:'GoogleMapsCompatible_Level6', fmt:'png'
+    id:'terra_tc', label:'True Colour (Terra)', sub:'MODIS Terra · raw satellite',
+    color:'#29b6f6', on:false, opacity:1.0, maxZ:9, type:'wmts',
+    url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg'
   },
 ];
 
 var LEGENDS = {
   sst:{title:'Sea Surface Temp (C)',desc:'Cold=blue/purple. Warm=red. Cold upwellings often reduce visibility.',grad:'linear-gradient(to right,#0d0060,#0000ff,#00b4ff,#00ffff,#ffff00,#ff8000,#ff0000)',ticks:['<12','16','20','24','>28']},
-  terra:{title:'True Colour — MODIS Terra',desc:'Raw satellite image. Green/brown ocean = phytoplankton. White = cloud.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#ffffff)',ticks:['Deep','','Coast','','Cloud']},
-  aqua:{title:'True Colour — MODIS Aqua',desc:'Second daily pass. Green/brown water = lower vis. Complements Terra.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#ffffff)',ticks:['Deep','','Coast','','Cloud']},
-  viirs:{title:'True Colour — VIIRS NOAA-20',desc:'Highest resolution. Best for seeing sediment plumes and turbidity.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#ffffff)',ticks:['Deep','','Coast','','Cloud']},
-  chlor_modis:{title:'Chlorophyll-a MODIS (mg/m3)',desc:'Blue=clear water. Green/yellow/red=more phytoplankton=lower vis.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
-  chlor_viirs:{title:'Chlorophyll-a VIIRS (mg/m3)',desc:'Blue=clear water. Green/yellow/red=more phytoplankton=lower vis.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
+  chlor_modis:{title:'Chlorophyll-a MODIS (mg/m3)',desc:'Blue=clear water. Green/yellow/red=more phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
+  chlor_viirs:{title:'Chlorophyll-a VIIRS (mg/m3)',desc:'Blue=clear water. Green/yellow/red=more phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
+  terra_tc:{title:'True Colour MODIS Terra',desc:'Raw satellite image. Green/brown water=phytoplankton. White=cloud cover.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#fff)',ticks:['Deep','','','','Cloud']},
 };
 
 // ── Date ──────────────────────────────────────────────────────
@@ -180,7 +161,7 @@ function stepDate(n){
   curDate=s;
   document.getElementById('date-in').value=s;
   document.getElementById('bdg').textContent=s;
-  removeNasaTiles();draw();
+  clearOverlayTiles();draw();
 }
 
 // ── Map maths ─────────────────────────────────────────────────
@@ -190,6 +171,28 @@ function lat2ty(lat,z){var s=Math.sin(lat*D2R);return(1-Math.log((1+s)/(1-s))/(2
 function tx2lon(x,z){return x/Math.pow(2,z)*360-180;}
 function ty2lat(y,z){var n=PI-2*PI*y/Math.pow(2,z);return R2D*Math.atan(.5*(Math.exp(n)-Math.exp(-n)));}
 
+// Convert tile to geographic bbox (lon/lat)
+function tile2bbox(tx,ty,tz){
+  var n=Math.pow(2,tz);
+  var west=tx/n*360-180;
+  var east=(tx+1)/n*360-180;
+  var north=R2D*Math.atan(Math.sinh(PI*(1-2*ty/n)));
+  var south=R2D*Math.atan(Math.sinh(PI*(1-2*(ty+1)/n)));
+  return {west:west,east:east,north:north,south:south};
+}
+
+// Build WMS URL for chlorophyll
+// Uses 512px tiles for higher resolution and smooth rendering
+function buildWmsUrl(layer,tx,ty,tz,date){
+  var bb=tile2bbox(tx,ty,tz);
+  var bbox=bb.west+','+bb.south+','+bb.east+','+bb.north;
+  return 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi'+
+    '?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap'+
+    '&LAYERS='+layer+'&STYLES=&FORMAT=image/png'+
+    '&TRANSPARENT=true&WIDTH=512&HEIGHT=512'+
+    '&SRS=EPSG:4326&BBOX='+bbox+'&TIME='+date;
+}
+
 var V={cx:152.5,cy:-32.5,z:7};
 var TS=256,drag=false,ds=null,dv=null,sideOpen=true;
 var clickCoords=null,userLL=null;
@@ -198,16 +201,20 @@ var mwrap=document.getElementById('mwrap');
 function W(){return mwrap.clientWidth;}
 function H(){return mwrap.clientHeight;}
 
-function removeNasaTiles(){
-  tilesEl.querySelectorAll('img[data-nasa]').forEach(function(i){i.remove();});
+function clearOverlayTiles(){
+  tilesEl.querySelectorAll('img[data-overlay]').forEach(function(i){i.remove();});
 }
 
-// ── Build URL — routes chlorophyll through proxy ───────────────
 function buildUrl(cfg,tx,ty,tz){
-  if(cfg.proxy && PROXY){
-    // Route through Cloudflare Worker to bypass CORS
-    var mode = cfg.wms ? 'wms' : 'wmts';
-    return PROXY+'?layer='+cfg.gibsLayer+'&date='+curDate+'&z='+tz+'&y='+ty+'&x='+tx+'&tms='+cfg.tms+'&fmt='+cfg.fmt+'&mode='+mode;
+  if(cfg.type==='wms'){
+    // Use 3-day composite to fill gaps from cloud cover
+    // WMS TIME parameter accepts date ranges: start/end
+    var d1=new Date(curDate);
+    d1.setDate(d1.getDate()-1);
+    var d2=new Date(curDate);
+    d2.setDate(d2.getDate()+1);
+    var timeRange=fmtDate(d1)+'/'+fmtDate(d2);
+    return buildWmsUrl(cfg.wmsLayer,tx,ty,tz,timeRange);
   }
   return cfg.url
     .replace('{z}',tz).replace('{y}',ty).replace('{x}',tx)
@@ -226,8 +233,7 @@ function _draw(){
   var w=W(),h=H();if(!w||!h)return;
   var existing={};
   tilesEl.querySelectorAll('img[data-k]').forEach(function(el){existing[el.dataset.k]=el;});
-  var used={};
-  var anyNew=false;
+  var used={};var anyNew=false;
 
   LAYERS.forEach(function(cfg,li){
     if(!cfg.on)return;
@@ -245,7 +251,7 @@ function _draw(){
         var wx=((tx%tc)+tc)%tc;
         var px=Math.round(tx*sc+ox),py=Math.round(ty*sc+oy),sz=Math.round(sc);
         var url=buildUrl(cfg,wx,ty,tz);
-        var k=cfg.id+'|'+url;
+        var k=cfg.id+'|'+tz+'|'+wx+'|'+ty;
         used[k]=1;
 
         if(existing[k]){
@@ -256,9 +262,8 @@ function _draw(){
         } else {
           var img=new Image();
           img.dataset.k=k;
-          if(cfg.nasa)img.dataset.nasa='1';
-          if(cfg.nasa)img.crossOrigin='anonymous';
-          img.style.cssText='position:absolute;left:'+px+'px;top:'+py+'px;width:'+sz+'px;height:'+sz+'px;opacity:'+cfg.opacity+';z-index:'+li+';pointer-events:none;';
+          if(cfg.type!=='xyz')img.dataset.overlay='1';
+          img.style.cssText='position:absolute;left:'+px+'px;top:'+py+'px;width:'+sz+'px;height:'+sz+'px;opacity:'+cfg.opacity+';z-index:'+li+';pointer-events:none;image-rendering:auto;-webkit-filter:blur(0);filter:blur(0);';
           anyNew=true;
           img.onload=function(){loadDone();};
           img.onerror=function(){this.style.display='none';loadDone();};
@@ -277,7 +282,7 @@ var loadN=0,loadTimer=null;
 function showLoad(on){
   var el=document.getElementById('loadbar');
   if(on){loadN++;el.classList.add('on');}
-  else{if(loadTimer)clearTimeout(loadTimer);loadTimer=setTimeout(function(){el.classList.remove('on');loadN=0;},500);}
+  else{if(loadTimer)clearTimeout(loadTimer);loadTimer=setTimeout(function(){el.classList.remove('on');loadN=0;},600);}
 }
 function loadDone(){loadN--;if(loadN<=0)showLoad(false);}
 
@@ -312,11 +317,10 @@ mwrap.addEventListener('wheel',function(e){
 },{passive:false});
 mwrap.addEventListener('click',function(e){
   var r=mwrap.getBoundingClientRect();
-  var px=e.clientX-r.left,py=e.clientY-r.top;
   var w=W(),h=H(),z=V.z,tz=Math.floor(z),s=TS*Math.pow(2,z-tz);
   clickCoords={
-    lat:ty2lat(lat2ty(V.cy,tz)+(py-h/2)/s,tz).toFixed(4),
-    lng:tx2lon(lon2tx(V.cx,tz)+(px-w/2)/s,tz).toFixed(4)
+    lat:ty2lat(lat2ty(V.cy,tz)+(e.clientY-r.top-h/2)/s,tz).toFixed(4),
+    lng:tx2lon(lon2tx(V.cx,tz)+(e.clientX-r.left-w/2)/s,tz).toFixed(4)
   };
   renderPtInfo();
 });
@@ -460,7 +464,7 @@ di.value=curDate;di.max=todayStr;di.min='2020-01-01';
 di.addEventListener('change',function(e){
   curDate=e.target.value;
   document.getElementById('bdg').textContent=curDate;
-  removeNasaTiles();draw();
+  clearOverlayTiles();draw();
 });
 window.addEventListener('resize',function(){draw();updateDot();});
 renderAll();
