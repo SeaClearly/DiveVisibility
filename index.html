@@ -93,7 +93,7 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
     <div id="pt-wrap"></div>
     <div class="sec" style="margin-top:auto">
       <div class="slbl">Data Sources</div>
-      <div class="srclist">Esri World Imagery<br>NASA GIBS WMS · MODIS Aqua<br>NASA GIBS WMS · VIIRS SNPP<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>NASA GIBS / Earthdata</div>
+      <div class="srclist">Esri World Imagery<br>NASA GIBS WMS · MODIS Aqua (daily + 3-day)<br>NASA GIBS WMS · VIIRS SNPP (daily + 3-day)<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>NASA GIBS / Earthdata</div>
     </div>
   </div>
   <button id="tog">&#9664;</button>
@@ -147,6 +147,16 @@ var LAYERS = [
     wmsLayer:'IMOS/SRS/OC/gridded/aqua/P1D/{year}/{month}/A{datecompact}_chl_oc3.nc',
     wmsName:'chl_oc3', wmsServer:'imos'
   },
+  {
+    id:'chlor_modis_3d', label:'Chlorophyll 3-Day (MODIS)', sub:'MODIS Aqua · 3-day composite · gap filled',
+    color:'#69f0ae', on:false, opacity:0.85, maxZ:9, type:'wms',
+    wmsLayer:'MODIS_Aqua_L2_Chlorophyll_A', composite:3
+  },
+  {
+    id:'chlor_viirs_3d', label:'Chlorophyll 3-Day (VIIRS)', sub:'VIIRS SNPP · 3-day composite · gap filled',
+    color:'#ffcc02', on:false, opacity:0.85, maxZ:9, type:'wms',
+    wmsLayer:'VIIRS_SNPP_L2_Chlorophyll_A', composite:3
+  },
 ];
 
 var LEGENDS = {
@@ -155,6 +165,8 @@ var LEGENDS = {
   chlor_viirs:{title:'Chlorophyll-a VIIRS (mg/m3)',desc:'Blue=clear water. Green/yellow/red=more phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
   terra_tc:{title:'True Colour MODIS Terra',desc:'Raw satellite image. Green/brown water=phytoplankton. White=cloud cover.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#fff)',ticks:['Deep','','','','Cloud']},
   imos_chlor:{title:'Chlorophyll IMOS (mg/m3)',desc:'Australian-specific processing. Higher coastal resolution. Blue=clear, green/yellow/red=phytoplankton=lower vis.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
+  chlor_modis_3d:{title:'Chlorophyll 3-Day MODIS (mg/m3)',desc:'3-day composite fills cloud gaps for a fuller picture. Blue=clear, green/yellow/red=phytoplankton=lower vis.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8800,#ff0000)',ticks:['0.01','0.1','1','10','60']},
+  chlor_viirs_3d:{title:'Chlorophyll 3-Day VIIRS (mg/m3)',desc:'3-day composite fills cloud gaps for a fuller picture. Blue=clear, green/yellow/red=phytoplankton=lower vis.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8800,#ff0000)',ticks:['0.01','0.1','1','10','60']},
 };
 
 // ── Date ──────────────────────────────────────────────────────
@@ -237,7 +249,15 @@ function buildUrl(cfg,tx,ty,tz){
     if(cfg.wmsServer==='imos'){
       return buildImosUrl(cfg,tx,ty,tz,curDate);
     }
-    // NASA GIBS WMS - use 3-day composite to fill gaps
+    // NASA GIBS WMS
+    if(cfg.composite && cfg.composite===3){
+      // True 3-day composite: centre date ±1 day
+      var d1=new Date(curDate); d1.setDate(d1.getDate()-1);
+      var d2=new Date(curDate); d2.setDate(d2.getDate()+1);
+      var timeRange=fmtDate(d1)+'/'+fmtDate(d2);
+      return buildWmsUrl(cfg.wmsLayer,tx,ty,tz,timeRange);
+    }
+    // Single day with ±1 day fallback
     var d1=new Date(curDate);
     d1.setDate(d1.getDate()-1);
     var d2=new Date(curDate);
