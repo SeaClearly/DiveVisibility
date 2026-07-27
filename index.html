@@ -482,7 +482,15 @@ function _draw(){
     });
   });
 
-  Object.keys(existing).forEach(function(k){if(!used[k])existing[k].remove();});
+  Object.keys(existing).forEach(function(k){
+    if(used[k])return;
+    var el=existing[k];
+    // Don't remove stale tiles immediately - keep them visible underneath
+    // their replacements (new tiles are appended after, so they render on
+    // top at the same z-index) until the new tiles have had time to load,
+    // so panning/zooming doesn't flash to the empty background in between.
+    setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);},300);
+  });
   if(anyNew)showLoad(true);
   scheduleWindyUpdate();
 }
@@ -538,7 +546,7 @@ var ppd=null,tmd=false;
 mapInteract.addEventListener('touchstart',function(e){
   e.preventDefault();tmd=false;
   if(e.touches.length===1){drag=true;ds={x:e.touches[0].clientX,y:e.touches[0].clientY};dv={cx:V.cx,cy:V.cy};}
-  if(e.touches.length===2)ppd=null;
+  if(e.touches.length===2){drag=false;ppd=null;}
 },{passive:false});
 mapInteract.addEventListener('touchmove',function(e){
   e.preventDefault();tmd=true;
@@ -560,8 +568,20 @@ mapInteract.addEventListener('touchmove',function(e){
   }
 },{passive:false});
 mapInteract.addEventListener('touchend',function(e){
-  if(e.touches.length===0)drag=false;
-  if(e.touches.length<2)ppd=null;
+  if(e.touches.length===0){
+    drag=false;ppd=null;
+  } else if(e.touches.length===1){
+    // A finger was lifted (e.g. ending a 2-finger pinch). Re-baseline the drag
+    // origin to the remaining touch's current position, otherwise the next
+    // touchmove computes its delta against a stale start point from before
+    // the pinch and the map jumps/teleports.
+    drag=true;
+    ds={x:e.touches[0].clientX,y:e.touches[0].clientY};
+    dv={cx:V.cx,cy:V.cy};
+    ppd=null;
+  } else {
+    ppd=null;
+  }
   if(!tmd&&e.changedTouches.length===1){
     var r=mwrap.getBoundingClientRect();
     var px=e.changedTouches[0].clientX-r.left,py=e.changedTouches[0].clientY-r.top;
@@ -573,6 +593,12 @@ mapInteract.addEventListener('touchend',function(e){
     renderPtInfo();
   }
 },{passive:false});
+mapInteract.addEventListener('touchcancel',function(){
+  // System gestures (e.g. edge-swipe, notification pull-down) can fire
+  // touchcancel instead of touchend, which would otherwise leave drag/ppd
+  // stuck in a stale state and cause a jump on the next touch.
+  drag=false;ppd=null;
+},{passive:true});
 
 // ── Geolocation ───────────────────────────────────────────────
 function locateMe(){
