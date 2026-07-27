@@ -183,14 +183,17 @@ var LEGENDS = {
 
 // ── Date ──────────────────────────────────────────────────────
 function fmtDate(d){return d.toISOString().split('T')[0];}
-var todayStr=fmtDate(new Date(Date.now()-864e5*1));
+// Actual today - the latest date we let the user pick. Same-day imagery
+// can already be published by the time someone's diving/checking at night,
+// so we don't want to artificially cap selection at yesterday.
+var maxDate=fmtDate(new Date());
 // Best-guess fallback until fetchLatestAvailableDate() (below) resolves with
 // the real answer from NASA GIBS. GHRSST MUR SST near-real-time is normally
 // only ~1 day behind, so default to yesterday - the freshest day we'd
 // realistically expect to have data. If the source turns out to be lagging
 // further, fetchLatestAvailableDate() below will correct it; gaps in the
 // other layers (cloud cover etc.) are what the 3-day composite toggle is for.
-var curDate=todayStr;
+var curDate=fmtDate(new Date(Date.now()-864e5*1));
 var compositeMode=false;
 
 // Ask NASA GIBS directly which date is actually the most recent one it has
@@ -213,7 +216,7 @@ function fetchLatestAvailableDate(){
     var lastRange=ranges[ranges.length-1];
     var end=(lastRange.split('/')[1]||lastRange.split('/')[0]).trim().slice(0,10);
     if(!/^\d{4}-\d{2}-\d{2}$/.test(end))return;
-    if(end>todayStr)end=todayStr;
+    if(end>maxDate)end=maxDate;
     if(end===curDate)return;
     curDate=end;
     document.getElementById('date-in').value=curDate;
@@ -246,7 +249,7 @@ function updateDateRangeDisplay(){
 
 function stepDate(n){
   var d=new Date(curDate);d.setDate(d.getDate()+n);
-  var s=fmtDate(d);if(s>todayStr)return;
+  var s=fmtDate(d);if(s>maxDate)return;
   curDate=s;
   document.getElementById('date-in').value=s;
   document.getElementById('bdg').textContent=s;
@@ -782,7 +785,7 @@ document.getElementById('tog').addEventListener('click',function(){
 });
 
 var di=document.getElementById('date-in');
-di.value=curDate;di.max=todayStr;di.min='2020-01-01';
+di.value=curDate;di.max=maxDate;di.min='2020-01-01';
 di.addEventListener('change',function(e){
   curDate=e.target.value;
   document.getElementById('bdg').textContent=curDate;
