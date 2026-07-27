@@ -186,8 +186,44 @@ var LEGENDS = {
 // ── Date ──────────────────────────────────────────────────────
 function fmtDate(d){return d.toISOString().split('T')[0];}
 var todayStr=fmtDate(new Date(Date.now()-864e5*1));
-var curDate=fmtDate(new Date(Date.now()-864e5*2));
+// Best-guess fallback until fetchLatestAvailableDate() (below) resolves with
+// the real answer from NASA GIBS. GHRSST MUR SST near-real-time is normally
+// only ~1 day behind, so default to yesterday - the freshest day we'd
+// realistically expect to have data. If the source turns out to be lagging
+// further, fetchLatestAvailableDate() below will correct it; gaps in the
+// other layers (cloud cover etc.) are what the 3-day composite toggle is for.
+var curDate=todayStr;
 var compositeMode=false;
+
+// Ask NASA GIBS directly which date is actually the most recent one it has
+// imagery for (via the WMTS DescribeDomains request), rather than guessing
+// a fixed day offset. Uses the SST layer as the reference since it's the
+// gap-filled, always-available layer. Falls back silently to the guess
+// above if the request fails (offline, CORS, etc).
+function fetchLatestAvailableDate(){
+  var sst=LAYERS.find(function(c){return c.id==='sst';});
+  if(!sst)return;
+  var tms=sst.url.split('/').filter(function(p){return p.indexOf('GoogleMapsCompatible')===0;})[0];
+  var url='https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/wmts.cgi'+
+    '?SERVICE=WMTS&REQUEST=DescribeDomains&VERSION=1.0.0'+
+    '&LAYER=GHRSST_L4_MUR_Sea_Surface_Temperature'+
+    '&TILEMATRIXSET='+tms;
+  fetch(url).then(function(r){return r.text();}).then(function(xml){
+    var m=xml.match(/<Domain>([\s\S]*?)<\/Domain>/);
+    if(!m)return;
+    var ranges=m[1].trim().split(',');
+    var lastRange=ranges[ranges.length-1];
+    var end=(lastRange.split('/')[1]||lastRange.split('/')[0]).trim().slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(end))return;
+    if(end>todayStr)end=todayStr;
+    if(end===curDate)return;
+    curDate=end;
+    document.getElementById('date-in').value=curDate;
+    document.getElementById('bdg').textContent=curDate;
+    if(compositeMode)updateDateRangeDisplay();
+    clearOverlayTiles();draw();
+  }).catch(function(){/* offline or blocked - keep the estimated default date */});
+}
 
 function toggleComposite(){
   compositeMode=!compositeMode;
@@ -759,6 +795,7 @@ di.addEventListener('change',function(e){
 window.addEventListener('resize',function(){draw();updateDot();});
 renderAll();
 draw();
+fetchLatestAvailableDate();
 </script>
 </body>
 </html>
