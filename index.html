@@ -77,6 +77,14 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
 #mapbtns{position:absolute;bottom:calc(90px + env(safe-area-inset-bottom));right:12px;z-index:1001;display:flex;flex-direction:column;gap:4px}
 .mbtn{width:36px;height:36px;background:rgba(5,13,26,.9);border:1px solid rgba(79,195,247,.18);border-radius:8px;color:#4fc3f7;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none}
 .mbtn:hover{background:rgba(79,195,247,.1)}
+.mbtn-day{font-size:10px;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:-.3px}
+#date-chips{position:absolute;left:12px;right:56px;bottom:calc(90px + env(safe-area-inset-bottom));z-index:1000;background:rgba(5,13,26,.88);border:1px solid rgba(79,195,247,.16);border-radius:8px;padding:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;scrollbar-width:none}
+#date-chips::-webkit-scrollbar{display:none}
+.dchip{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:42px;height:36px;margin-right:5px;padding:0 8px;border-radius:6px;background:rgba(79,195,247,.06);border:1px solid transparent;color:rgba(255,255,255,.55);font-family:'DM Mono',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
+.dchip:last-child{margin-right:0}
+.dchip .dow{font-size:8px;opacity:.65;line-height:1.3}
+.dchip .dnum{font-size:11px;font-weight:600;line-height:1.3}
+.dchip.sel{background:rgba(79,195,247,.2);border-color:#4fc3f7;color:#4fc3f7}
 #udot{position:absolute;z-index:1001;width:14px;height:14px;border-radius:50%;background:#4fc3f7;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(79,195,247,.25);transform:translate(-50%,-50%);pointer-events:none;display:none}
 #composite-toggle.active{background:rgba(79,195,247,.4);border-color:#4fc3f7;box-shadow:0 0 8px rgba(79,195,247,.3)}
 #composite-toggle.active .composite-knob{left:20px !important;background:#4fc3f7 !important;opacity:1 !important}
@@ -115,39 +123,25 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
       <div id="loc-status"></div>
     </div>
     <div class="sec"><div class="slbl">Data Layers</div><div id="lyrs"></div></div>
-    <div class="sec">
-      <div class="slbl">Ocean Currents</div>
-      <div class="lcard" id="currents-card">
-        <div class="ltog" onclick="toggleCurrents()" style="-webkit-tap-highlight-color:transparent">
-          <div class="ldot" style="background:#29b6f6;--c:#29b6f6"></div>
-          <div class="li"><div class="ln">Ocean Currents</div><div class="ls">Windy GFS model · animated</div></div>
-          <div class="lck" id="currents-check"></div>
-        </div>
-        <div id="currents-note" style="display:none;padding:6px 10px 8px;font-size:9px;color:rgba(255,255,255,.3);line-height:1.4;background:rgba(0,0,0,.12)">Powered by Windy.com · Logo must remain visible</div>
-      </div>
-    </div>
     <div class="sec" id="leg-sec" style="display:none"><div class="slbl">Legend</div><div id="leg-inner"></div></div>
     <div id="pt-wrap"></div>
     <div class="sec" style="margin-top:auto">
       <div class="slbl">Data Sources</div>
-      <div class="srclist">Esri World Imagery<br>NASA GIBS · MODIS Aqua Chlorophyll<br>NASA GIBS · VIIRS SNPP Chlorophyll<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>Esri Reference · Place Labels</div>
+      <div class="srclist">Esri World Imagery<br>NASA GIBS · MODIS Aqua Chlorophyll<br>NASA GIBS · VIIRS SNPP Chlorophyll<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>AODN geoserver · IMOS OceanCurrent (GSLA)<br>Esri Reference · Place Labels</div>
     </div>
   </div>
   <button id="tog">&#9664;</button>
   <div id="mwrap">
     <div id="tiles"></div>
     <div id="map-interact"></div>
-    <div id="windy-wrap" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:60">
-      <iframe id="windy-iframe" 
-        style="width:100%;height:100%;border:none;pointer-events:none"
-        allowtransparency="true">
-      </iframe>
-    </div>
     <div id="loadbar"></div>
+
     <div id="udot"></div>
     <div class="badge"><strong id="bdg"></strong><span>Satellite imagery date</span></div>
     <div class="msrc">Esri &middot; NASA GIBS &middot; MODIS &middot; VIIRS &middot; GHRSST</div>
+    <div id="date-chips"></div>
     <div id="mapbtns">
+      <button class="mbtn mbtn-day" onclick="setDate(maxDate)" title="Jump to latest available image">&#9889;</button>
       <button class="mbtn" onclick="locateMe()">&#9678;</button>
     </div>
   </div>
@@ -169,31 +163,33 @@ var LAYERS = [
     color:'#66bb6a', on:false, opacity:0.9, maxZ:9, type:'chlor_composite'
   },
   {
-    id:'terra_tc', label:'True Colour (Terra)', sub:'MODIS Terra · raw satellite',
+    id:'terra_tc', label:'Live Satellite', sub:'MODIS Terra · raw satellite',
     color:'#29b6f6', on:false, opacity:1.0, maxZ:9, type:'wmts',
     url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg'
+  },
+  {
+    id:'currents', label:'Ocean Currents', sub:'IMOS GSLA · geostrophic velocity',
+    color:'#ab47bc', on:false, opacity:0.85, maxZ:8, type:'wms', wmsServer:'aodn_currents'
   },
 ];
 
 var LEGENDS = {
   sst:{title:'Sea Surface Temp (C)',desc:'Cold=blue/purple. Warm=red. Cold upwellings often reduce visibility.',grad:'linear-gradient(to right,#0d0060,#0000ff,#00b4ff,#00ffff,#ffff00,#ff8000,#ff0000)',ticks:['<12','16','20','24','>28']},
   chlorophyll:{title:'Chlorophyll-a (mg/m³)',desc:'MODIS + VIIRS + IMOS combined. Blue=clear water. Green/yellow/red=phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
-  terra_tc:{title:'True Colour MODIS Terra',desc:'Raw satellite image. Green/brown water=phytoplankton. White=cloud cover.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#fff)',ticks:['Deep','','','','Cloud']},
+  terra_tc:{title:'Live Satellite (MODIS Terra)',desc:'Raw satellite image. Green/brown water=phytoplankton. White=cloud cover.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#fff)',ticks:['Deep','','','','Cloud']},
+  currents:{title:'Surface Current Speed (m/s)',desc:'IMOS GSLA geostrophic surface velocity, derived from satellite altimetry. Typically ~4 days behind real time - a large-scale offshore picture (eddies, EAC), not fine nearshore detail.',grad:'linear-gradient(to right,#1a237e,#1e88e5,#26c6da,#66bb6a,#fdd835,#f4511e)',ticks:['0','0.25','0.5','0.75','1+']},
 };
 
 // ── Date ──────────────────────────────────────────────────────
 function fmtDate(d){return d.toISOString().split('T')[0];}
-// Actual today - the latest date we let the user pick. Same-day imagery
-// can already be published by the time someone's diving/checking at night,
-// so we don't want to artificially cap selection at yesterday.
-var maxDate=fmtDate(new Date());
-// Best-guess fallback until fetchLatestAvailableDate() (below) resolves with
-// the real answer from NASA GIBS. GHRSST MUR SST near-real-time is normally
-// only ~1 day behind, so default to yesterday - the freshest day we'd
-// realistically expect to have data. If the source turns out to be lagging
-// further, fetchLatestAvailableDate() below will correct it; gaps in the
-// other layers (cloud cover etc.) are what the 3-day composite toggle is for.
-var curDate=fmtDate(new Date(Date.now()-864e5*1));
+// Max date the user can pick: yesterday. Satellite/model data for "today"
+// isn't reliably published yet, so we cap selection one day back.
+var maxDate=fmtDate(new Date(Date.now()-864e5*1));
+// Default date shown on load - same as maxDate (freshest we'd expect).
+// fetchLatestAvailableDate() below refines this once it hears back from
+// NASA GIBS about what's actually available; gaps in the other layers
+// (cloud cover etc.) are what the 3-day composite toggle is for.
+var curDate=maxDate;
 var compositeMode=false;
 
 // Ask NASA GIBS directly which date is actually the most recent one it has
@@ -218,11 +214,7 @@ function fetchLatestAvailableDate(){
     if(!/^\d{4}-\d{2}-\d{2}$/.test(end))return;
     if(end>maxDate)end=maxDate;
     if(end===curDate)return;
-    curDate=end;
-    document.getElementById('date-in').value=curDate;
-    document.getElementById('bdg').textContent=curDate;
-    if(compositeMode)updateDateRangeDisplay();
-    clearOverlayTiles();draw();
+    setDate(end);
   }).catch(function(){/* offline or blocked - keep the estimated default date */});
 }
 
@@ -247,14 +239,47 @@ function updateDateRangeDisplay(){
   document.getElementById('date-d3').textContent=d3.toLocaleDateString('en-AU',opts);
 }
 
-function stepDate(n){
-  var d=new Date(curDate);d.setDate(d.getDate()+n);
-  var s=fmtDate(d);if(s>maxDate)return;
+function setDate(s){
+  if(s>maxDate)s=maxDate;
   curDate=s;
   document.getElementById('date-in').value=s;
   document.getElementById('bdg').textContent=s;
   if(compositeMode)updateDateRangeDisplay();
+  renderDateChips();
   clearOverlayTiles();draw();
+}
+
+function stepDate(n){
+  var d=new Date(curDate);d.setDate(d.getDate()+n);
+  var s=fmtDate(d);if(s>maxDate)return;
+  setDate(s);
+}
+
+// ── Quick date chips (on-map, no sidebar needed) ────────────────
+// A row of large, discrete, tappable dates (not a slider - easier to hit
+// accurately, especially on a boat/wet hands). Covers the most recent
+// CHIP_DAYS days; older dates still go through the full picker in the
+// sidebar. Rebuilt each time the date changes so the selected chip and
+// window of days shown both stay current.
+var CHIP_DAYS=13;
+function renderDateChips(){
+  var el=document.getElementById('date-chips');
+  if(!el)return;
+  el.innerHTML='';
+  var selChip=null;
+  for(var i=CHIP_DAYS;i>=0;i--){
+    var d=new Date(maxDate);
+    d.setDate(d.getDate()-i);
+    var s=fmtDate(d);
+    var chip=document.createElement('div');
+    chip.className='dchip'+(s===curDate?' sel':'');
+    chip.innerHTML='<span class="dow">'+d.toLocaleDateString('en-AU',{weekday:'short'})+'</span>'+
+      '<span class="dnum">'+d.getDate()+' '+d.toLocaleDateString('en-AU',{month:'short'})+'</span>';
+    chip.onclick=(function(dateStr){return function(){setDate(dateStr);};})(s);
+    el.appendChild(chip);
+    if(s===curDate)selChip=chip;
+  }
+  if(selChip)selChip.scrollIntoView({inline:'center',block:'nearest'});
 }
 
 // ── Map maths ─────────────────────────────────────────────────
@@ -306,6 +331,25 @@ function buildImosUrl(cfg,tx,ty,tz,date){
     '&COLORSCALERANGE=0.01,10&LOGSCALE=true';
 }
 
+// Build AODN GeoServer/ncWMS URL for IMOS OceanCurrent surface geostrophic
+// velocity (GSLA - derived from satellite altimetry). Unlike the previous
+// Windy iframe embed, this is a plain WMS raster tile request - same
+// mechanism as the other overlay layers, so it lives or dies with normal
+// image load/error handling instead of a flaky third-party iframe/JS SDK.
+// NOTE: this endpoint couldn't be live-tested from this environment (it's
+// not on the sandbox's network allowlist and blocks automated fetches), so
+// if it renders blank/wrong once deployed, the layer/style names below are
+// the first thing to double check against AODN's GeoServer.
+function buildCurrentsUrl(tx,ty,tz,date){
+  var bb=tile2bbox(tx,ty,tz);
+  var bbox=bb.west+','+bb.south+','+bb.east+','+bb.north;
+  return 'https://geoserver-123.aodn.org.au/geoserver/ncwms'+
+    '?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap'+
+    '&LAYERS=gsla_fv02_nrt_timeseries_url/surface_geostrophic_sea_water_velocity'+
+    '&STYLES=&FORMAT=image/png&TRANSPARENT=true&WIDTH=512&HEIGHT=512'+
+    '&SRS=EPSG:4326&BBOX='+bbox+'&TIME='+date;
+}
+
 var V={cx:152.5,cy:-32.5,z:7};
 var TS=256,drag=false,ds=null,dv=null,sideOpen=true;
 var clickCoords=null,userLL=null;
@@ -323,6 +367,9 @@ function buildUrl(cfg,tx,ty,tz){
   if(cfg.type==='wms'){
     if(cfg.wmsServer==='imos'){
       return buildImosUrl(cfg,tx,ty,tz,curDate);
+    }
+    if(cfg.wmsServer==='aodn_currents'){
+      return buildCurrentsUrl(tx,ty,tz,curDate);
     }
     // NASA GIBS WMS — single date only (composite handled separately in _draw)
     return buildWmsUrl(cfg.wmsLayer,tx,ty,tz,curDate);
@@ -529,7 +576,6 @@ function _draw(){
     setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);},300);
   });
   if(anyNew)showLoad(true);
-  scheduleWindyUpdate();
 }
 
 var loadN=0,loadTimer=null;
@@ -708,60 +754,6 @@ function renderPtInfo(){
 
 function renderAll(){renderLayers();renderLegend();renderPtInfo();document.getElementById('bdg').textContent=curDate;}
 
-// ── Windy Currents ───────────────────────────────────────────
-var currentsOn = false;
-var windyReady = false;
-var windyAPI = null;
-
-function toggleCurrents(){
-  currentsOn = !currentsOn;
-  var card = document.getElementById('currents-card');
-  var check = document.getElementById('currents-check');
-  var note = document.getElementById('currents-note');
-  var wrap = document.getElementById('windy-wrap');
-  
-  card.classList.toggle('on', currentsOn);
-  check.innerHTML = currentsOn ? '&#10003;' : '';
-  note.style.display = currentsOn ? 'block' : 'none';
-  wrap.style.display = currentsOn ? 'block' : 'none';
-  
-  if(currentsOn) initWindy();
-}
-
-function buildWindyUrl(){
-  // Build Windy embed URL centred on current map view with currents layer
-  var lat = V.cy.toFixed(4);
-  var lon = V.cx.toFixed(4);
-  var zoom = Math.round(V.z);
-  return 'https://embed.windy.com/embed2.html?lat='+lat+'&lon='+lon
-    +'&detailLat='+lat+'&detailLon='+lon
-    +'&width=650&height=450&zoom='+zoom
-    +'&level=surface&overlay=currents&product=gfs'
-    +'&menu=&message=&marker=&calendar=now&pressure=&type=map'
-    +'&location=coordinates&detail=&metricWind=default&metricTemp=default'
-    +'&radarRange=-1'
-    +'&key=syqGXlJxihsoSM3wzpVSsbDXsfIgpEsA';
-}
-
-function initWindy(){
-  var iframe = document.getElementById('windy-iframe');
-  iframe.src = buildWindyUrl();
-  // Allow pointer events so user can interact with Windy
-  iframe.style.pointerEvents = 'auto';
-}
-
-// Update Windy when map moves significantly
-var windyUpdateTimer = null;
-function scheduleWindyUpdate(){
-  if(!currentsOn) return;
-  if(windyUpdateTimer) clearTimeout(windyUpdateTimer);
-  windyUpdateTimer = setTimeout(function(){
-    var iframe = document.getElementById('windy-iframe');
-    iframe.src = buildWindyUrl();
-  }, 800);
-}
-
-window.toggleCurrents = toggleCurrents;
 window.toggleComposite=toggleComposite;
 window.toggle=function(id){
   var cfg=LAYERS.find(function(c){return c.id===id;});
@@ -787,13 +779,11 @@ document.getElementById('tog').addEventListener('click',function(){
 var di=document.getElementById('date-in');
 di.value=curDate;di.max=maxDate;di.min='2020-01-01';
 di.addEventListener('change',function(e){
-  curDate=e.target.value;
-  document.getElementById('bdg').textContent=curDate;
-  if(compositeMode)updateDateRangeDisplay();
-  clearOverlayTiles();draw();
+  setDate(e.target.value);
 });
 window.addEventListener('resize',function(){draw();updateDot();});
 renderAll();
+renderDateChips();
 draw();
 fetchLatestAvailableDate();
 </script>
