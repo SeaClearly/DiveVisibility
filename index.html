@@ -359,28 +359,18 @@ function buildImosUrl(cfg,tx,ty,tz,date){
 // not on the sandbox's network allowlist and blocks automated fetches), so
 // if it renders blank/wrong once deployed, the layer/style names below are
 // the first thing to double check against AODN's GeoServer.
-// CMEMS (Copernicus Marine Service) WMTS - this is the actual source Windy's
-// currents layer is built on (their "Global Ocean Physics Analysis and
-// Forecast" model from Mercator Ocean, ~8km resolution, updated multiple
-// times a day - much better than the IMOS altimetry layer this replaces).
-// Uses the "merged-uv" quantity so it renders real current vectors
-// (direction + speed), and requests the EPSG:3857 (Web Mercator) tile
-// matrix so tx/ty/tz line up with every other layer in this app.
-// NOTE: unverified from this environment (the domain isn't reachable from
-// the sandbox). If tiles come back blank/404, the first things to check
-// against CMEMS's own docs are: the "EPSG:3857" tile matrix set name (their
-// documented example uses "EPSG:4326", which uses different tile math to
-// everything else here and would need separate handling), and the trailing
-// version suffix on the layer id (Copernicus revs these periodically, e.g.
-// "_202406" - if the plain name below 404s, that's likely why).
+// CMEMS (Copernicus Marine Service) WMTS - confirmed working layer, pulled
+// directly from their live GetCapabilities response. Uses the built-in
+// "vectors" style so it renders real current arrows, same idea as Windy.
 function buildCurrentsUrl(tx,ty,tz,date){
-  return 'https://wmts.marine.copernicus.eu/teroWmts/'+
+  return 'https://wmts.marine.copernicus.eu/teroWmts'+
     '?service=WMTS&version=1.0.0&request=GetTile'+
-    '&layer=GLOBAL_ANALYSISFORECAST_PHY_001_024/cmems_mod_glo_phy_anfc_merged-uv_PT1H-i'+
-    '&style=default&format=image/png'+
+    '&layer=GLOBAL_ANALYSISFORECAST_PHY_001_024/cmems_mod_glo_phy-cur_anfc_0.083deg_PT6H-i_202406/sea_water_velocity'+
+    '&style=cmap:speed,vectorStyle:solidAndVector'+
+    '&format=image/png'+
     '&tilematrixset=EPSG:3857'+
     '&tilematrix='+tz+'&tilerow='+ty+'&tilecol='+tx+
-    '&time='+date+'T12:00:00Z';
+    '&time='+date+'T00:00:00.000Z';
 }
 
 var V={cx:152.5,cy:-32.5,z:7};
