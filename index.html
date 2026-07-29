@@ -135,7 +135,7 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
     <div id="pt-wrap"></div>
     <div class="sec" style="margin-top:auto">
       <div class="slbl">Data Sources</div>
-      <div class="srclist">Esri World Imagery<br>NASA GIBS · MODIS Aqua Chlorophyll<br>NASA GIBS · VIIRS SNPP Chlorophyll<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>Copernicus Marine (CMEMS) · Ocean Currents<br>Esri Reference · Place Labels</div>
+      <div class="srclist">Esri World Imagery<br>NASA GIBS · MODIS Aqua Chlorophyll<br>NASA GIBS · VIIRS SNPP Chlorophyll<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>NOAA/Navy HYCOM · Animated Currents<br>Esri Reference · Place Labels</div>
     </div>
   </div>
   <button id="tog">&#9664;</button>
@@ -180,8 +180,8 @@ var LAYERS = [
     url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg'
   },
   {
-    id:'currents', label:'Ocean Currents', sub:'CMEMS · Mercator Ocean model',
-    color:'#ab47bc', on:false, opacity:0.85, maxZ:8, type:'wms', wmsServer:'cmems_currents'
+    id:'currents', label:'Ocean Currents', sub:'HYCOM · animated · ~8km',
+    color:'#ab47bc', on:false, opacity:0.85, maxZ:8, type:'particles'
   },
 ];
 
@@ -189,7 +189,7 @@ var LEGENDS = {
   sst:{title:'Sea Surface Temp (C)',desc:'Cold=blue/purple. Warm=red. Cold upwellings often reduce visibility.',grad:'linear-gradient(to right,#0d0060,#0000ff,#00b4ff,#00ffff,#ffff00,#ff8000,#ff0000)',ticks:['<12','16','20','24','>28']},
   chlorophyll:{title:'Chlorophyll-a (mg/m³)',desc:'MODIS + VIIRS + IMOS combined. Blue=clear water. Green/yellow/red=phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
   terra_tc:{title:'Live Satellite (MODIS Terra)',desc:'Raw satellite image. Green/brown water=phytoplankton. White=cloud cover.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#fff)',ticks:['Deep','','','','Cloud']},
-  currents:{title:'Surface Current Speed (m/s)',desc:'Copernicus Marine (CMEMS) Global Ocean Physics model - the same source Windy uses for its currents layer, ~8km resolution, updated multiple times a day.',grad:'linear-gradient(to right,#1a237e,#1e88e5,#26c6da,#66bb6a,#fdd835,#f4511e)',ticks:['0','0.25','0.5','0.75','1+']},
+  currents:{title:'Surface Current (white streaks)',desc:'HYCOM (NOAA/US Navy) global ocean model, ~8km resolution, updated daily. Streak direction = flow direction. Brighter + thicker = faster current. Kept white (not color-coded) so it doesn\u2019t distort chlorophyll\u2019s own color scale when both are on.',grad:'linear-gradient(to right,rgba(255,255,255,.15),rgba(255,255,255,.4),rgba(255,255,255,.7),#fff)',ticks:['Slow','','','Fast']},
 };
 
 // ── Date ──────────────────────────────────────────────────────
@@ -262,6 +262,7 @@ function setDate(s){
   if(compositeMode)updateDateRangeDisplay();
   renderDateChips();
   clearOverlayTiles();draw();
+  loadCurrentsField();
 }
 
 function stepDate(n){
@@ -350,28 +351,6 @@ function buildImosUrl(cfg,tx,ty,tz,date){
     '&COLORSCALERANGE=0.01,10&LOGSCALE=true';
 }
 
-// Build AODN GeoServer/ncWMS URL for IMOS OceanCurrent surface geostrophic
-// velocity (GSLA - derived from satellite altimetry). Unlike the previous
-// Windy iframe embed, this is a plain WMS raster tile request - same
-// mechanism as the other overlay layers, so it lives or dies with normal
-// image load/error handling instead of a flaky third-party iframe/JS SDK.
-// NOTE: this endpoint couldn't be live-tested from this environment (it's
-// not on the sandbox's network allowlist and blocks automated fetches), so
-// if it renders blank/wrong once deployed, the layer/style names below are
-// the first thing to double check against AODN's GeoServer.
-// CMEMS (Copernicus Marine Service) WMTS - confirmed working layer, pulled
-// directly from their live GetCapabilities response. Uses the built-in
-// "vectors" style so it renders real current arrows, same idea as Windy.
-function buildCurrentsUrl(tx,ty,tz,date){
-  return 'https://wmts.marine.copernicus.eu/teroWmts'+
-    '?service=WMTS&version=1.0.0&request=GetTile'+
-    '&layer=GLOBAL_ANALYSISFORECAST_PHY_001_024/cmems_mod_glo_phy-cur_anfc_0.083deg_PT6H-i_202406/sea_water_velocity'+
-    '&style=cmap:speed,vectorStyle:solidAndVector'+
-    '&format=image/png'+
-    '&tilematrixset=EPSG:3857'+
-    '&tilematrix='+tz+'&tilerow='+ty+'&tilecol='+tx+
-    '&time='+date+'T00:00:00.000Z';
-}
 
 var V={cx:152.5,cy:-32.5,z:7};
 var TS=256,drag=false,ds=null,dv=null,sideOpen=true;
@@ -382,6 +361,203 @@ var mapInteract=document.getElementById('map-interact');
 function W(){return mwrap.clientWidth;}
 function H(){return mwrap.clientHeight;}
 
+// ── Animated Ocean Currents (HYCOM) ──────────────────────────────
+// Windy's current arrows/streaks are an actual particle animation driven by
+// raw numeric velocity data - not something a static image tile can do.
+// CMEMS (the model Windy uses) only gives out raw numbers to logged-in
+// accounts, so this uses HYCOM instead: the US Navy/NOAA global ocean
+// model, similar ~8km resolution, public domain, served with no login via
+// NOAA's ERDDAP service in plain JSON. NOTE: not live-tested from this
+// sandbox (ncei.noaa.gov isn't on its network allowlist) - if the layer
+// loads with zero particles, open the Network tab, filter "ncei.noaa.gov",
+// and send back whatever JSON/error comes back so the dataset id/params
+// below can be corrected against it.
+var currentsField=null, currentsParticles=[], currentsAnimId=null;
+var currentsCanvas=null, currentsCtx=null, currentsFetchTimer=null;
+var CURRENTS_N=1000;
+
+function buildHycomUrl(bbox,date){
+  var t=date+'T12:00:00Z';
+  var latQ='('+bbox.south.toFixed(2)+'):('+bbox.north.toFixed(2)+')';
+  var lonQ='('+bbox.west.toFixed(2)+'):('+bbox.east.toFixed(2)+')';
+  return 'https://www.ncei.noaa.gov/erddap/griddap/Hycom_sfc_3d.json'+
+    '?water_u[('+t+')][(0.0)]'+'['+latQ+']['+lonQ+'],'+
+    'water_v[('+t+')][(0.0)]'+'['+latQ+']['+lonQ+']';
+}
+
+function currentsVisibleBbox(){
+  var w=W(),h=H(),z=V.z,tz=Math.floor(z),s=TS*Math.pow(2,z-tz);
+  var pad=Math.max(w,h)*0.15;
+  var west=tx2lon(lon2tx(V.cx,tz)-(w/2+pad)/s,tz);
+  var east=tx2lon(lon2tx(V.cx,tz)+(w/2+pad)/s,tz);
+  var north=ty2lat(lat2ty(V.cy,tz)-(h/2+pad)/s,tz);
+  var south=ty2lat(lat2ty(V.cy,tz)+(h/2+pad)/s,tz);
+  return {west:west,east:east,north:Math.min(north,89),south:Math.max(south,-89)};
+}
+
+function parseHycomJson(data){
+  var rows=data.table.rows, cols=data.table.columnNames;
+  var iLat=cols.indexOf('latitude'), iLon=cols.indexOf('longitude'),
+      iU=cols.indexOf('water_u'), iV=cols.indexOf('water_v');
+  var latSet={},lonSet={};
+  rows.forEach(function(r){latSet[r[iLat]]=1;lonSet[r[iLon]]=1;});
+  var latArr=Object.keys(latSet).map(Number).sort(function(a,b){return a-b;});
+  var lonArr=Object.keys(lonSet).map(Number).sort(function(a,b){return a-b;});
+  var nx=lonArr.length, ny=latArr.length;
+  var latIdx={},lonIdx={};
+  latArr.forEach(function(la,i){latIdx[la]=i;});
+  lonArr.forEach(function(lo,i){lonIdx[lo]=i;});
+  var u=new Float32Array(nx*ny), v=new Float32Array(nx*ny);
+  u.fill(NaN);v.fill(NaN);
+  rows.forEach(function(r){
+    var yi=latIdx[r[iLat]], xi=lonIdx[r[iLon]];
+    u[yi*nx+xi]=(r[iU]==null?NaN:r[iU]);
+    v[yi*nx+xi]=(r[iV]==null?NaN:r[iV]);
+  });
+  return {
+    lat0:latArr[0], lon0:lonArr[0],
+    dlat:ny>1?(latArr[ny-1]-latArr[0])/(ny-1):1,
+    dlon:nx>1?(lonArr[nx-1]-lonArr[0])/(nx-1):1,
+    nx:nx, ny:ny, u:u, v:v
+  };
+}
+
+function sampleCurrentsField(lon,lat){
+  var f=currentsField;
+  if(!f||f.nx<2||f.ny<2)return null;
+  var fx=(lon-f.lon0)/f.dlon, fy=(lat-f.lat0)/f.dlat;
+  if(fx<0||fx>f.nx-1||fy<0||fy>f.ny-1)return null;
+  var x0=Math.floor(fx),y0=Math.floor(fy);
+  var x1=Math.min(x0+1,f.nx-1),y1=Math.min(y0+1,f.ny-1);
+  var tx=fx-x0,ty=fy-y0;
+  function at(arr,xi,yi){var val=arr[yi*f.nx+xi];return isNaN(val)?null:val;}
+  var u00=at(f.u,x0,y0),u10=at(f.u,x1,y0),u01=at(f.u,x0,y1),u11=at(f.u,x1,y1);
+  var v00=at(f.v,x0,y0),v10=at(f.v,x1,y0),v01=at(f.v,x0,y1),v11=at(f.v,x1,y1);
+  if(u00===null||u10===null||u01===null||u11===null||
+     v00===null||v10===null||v01===null||v11===null)return null;
+  return {
+    u:u00*(1-tx)*(1-ty)+u10*tx*(1-ty)+u01*(1-tx)*ty+u11*tx*ty,
+    v:v00*(1-tx)*(1-ty)+v10*tx*(1-ty)+v01*(1-tx)*ty+v11*tx*ty
+  };
+}
+
+// Speed shown as brightness + thickness, not hue - a colored (blue-to-red)
+// stream would sit right on top of chlorophyll's own blue-to-red color
+// scale and visually distort it. White reads as pure "motion" and layers
+// cleanly over any color underneath (chlorophyll, SST, etc).
+function currentsSpeedStyle(spd){
+  var t=Math.min(spd/1.0,1);
+  return {alpha:0.35+t*0.5, width:1+t*1.1};
+}
+
+function currentsRespawn(p){
+  var f=currentsField;
+  if(!f)return;
+  p.lon=f.lon0+Math.random()*f.dlon*(f.nx-1);
+  p.lat=f.lat0+Math.random()*f.dlat*(f.ny-1);
+  p.age=0;
+}
+
+function seedCurrentsParticles(){
+  currentsParticles=[];
+  for(var i=0;i<CURRENTS_N;i++){
+    var p={lon:0,lat:0,age:0};
+    currentsRespawn(p);
+    p.age=Math.floor(Math.random()*80);
+    currentsParticles.push(p);
+  }
+}
+
+function loadCurrentsField(){
+  var cfg=LAYERS.find(function(c){return c.id==='currents';});
+  if(!cfg||!cfg.on)return;
+  var url=buildHycomUrl(currentsVisibleBbox(),curDate);
+  fetch(url).then(function(r){
+    if(!r.ok)throw new Error('HYCOM HTTP '+r.status);
+    return r.json();
+  }).then(function(data){
+    currentsField=parseHycomJson(data);
+    seedCurrentsParticles();
+  }).catch(function(err){
+    console.warn('Currents field failed to load:',err);
+    currentsField=null;
+  });
+}
+
+function currentsRefreshDebounced(){
+  var cfg=LAYERS.find(function(c){return c.id==='currents';});
+  if(!cfg||!cfg.on)return;
+  if(currentsFetchTimer)clearTimeout(currentsFetchTimer);
+  currentsFetchTimer=setTimeout(loadCurrentsField,500);
+}
+
+function currentsLLToScreen(lon,lat){
+  var w=W(),h=H(),z=V.z,tz=Math.floor(z),s=TS*Math.pow(2,z-tz);
+  return {
+    x:w/2+(lon2tx(lon,tz)-lon2tx(V.cx,tz))*s,
+    y:h/2+(lat2ty(lat,tz)-lat2ty(V.cy,tz))*s
+  };
+}
+
+function tickCurrents(){
+  currentsAnimId=requestAnimationFrame(tickCurrents);
+  if(!currentsCtx)return;
+  var w=W(),h=H();
+  if(currentsCanvas.width!==w||currentsCanvas.height!==h){
+    currentsCanvas.width=w;currentsCanvas.height=h;
+  }
+  // Fade old trails instead of clearing outright, for a streak/comet effect
+  currentsCtx.globalCompositeOperation='destination-in';
+  currentsCtx.fillStyle='rgba(0,0,0,0.92)';
+  currentsCtx.fillRect(0,0,w,h);
+  currentsCtx.globalCompositeOperation='source-over';
+  if(!currentsField)return;
+  currentsParticles.forEach(function(p){
+    var vel=sampleCurrentsField(p.lon,p.lat);
+    if(!vel||p.age>90){currentsRespawn(p);return;}
+    var speed=Math.sqrt(vel.u*vel.u+vel.v*vel.v);
+    var s0=currentsLLToScreen(p.lon,p.lat);
+    // Exaggerated timestep: real ocean currents (~0.1-1 m/s) would be
+    // imperceptibly slow to animate 1:1, so this speeds up the advection
+    // while keeping relative speed differences between particles accurate.
+    var dtSec=2200;
+    p.lon+=vel.u*dtSec/(111320*Math.cos(p.lat*PI/180));
+    p.lat+=vel.v*dtSec/110540;
+    p.age++;
+    var s1=currentsLLToScreen(p.lon,p.lat);
+    var style=currentsSpeedStyle(speed);
+    currentsCtx.strokeStyle='rgba(255,255,255,'+style.alpha+')';
+    currentsCtx.lineWidth=style.width;
+    currentsCtx.beginPath();
+    currentsCtx.moveTo(s0.x,s0.y);
+    currentsCtx.lineTo(s1.x,s1.y);
+    currentsCtx.stroke();
+  });
+}
+
+function startCurrentsAnim(){
+  if(!currentsCanvas){
+    currentsCanvas=document.createElement('canvas');
+    currentsCanvas.id='currents-canvas';
+    currentsCanvas.style.cssText='position:absolute;top:0;left:0;pointer-events:none;z-index:50';
+    mwrap.insertBefore(currentsCanvas,mapInteract);
+    currentsCtx=currentsCanvas.getContext('2d');
+  }
+  currentsCanvas.style.display='block';
+  loadCurrentsField();
+  if(!currentsAnimId)tickCurrents();
+}
+
+function stopCurrentsAnim(){
+  if(currentsAnimId){cancelAnimationFrame(currentsAnimId);currentsAnimId=null;}
+  if(currentsCanvas){
+    currentsCanvas.style.display='none';
+    currentsCtx.clearRect(0,0,currentsCanvas.width,currentsCanvas.height);
+  }
+  currentsParticles=[];
+  currentsField=null;
+}
+
 function clearOverlayTiles(){
   tilesEl.querySelectorAll('img[data-overlay]').forEach(function(i){i.remove();});
 }
@@ -390,9 +566,6 @@ function buildUrl(cfg,tx,ty,tz){
   if(cfg.type==='wms'){
     if(cfg.wmsServer==='imos'){
       return buildImosUrl(cfg,tx,ty,tz,curDate);
-    }
-    if(cfg.wmsServer==='cmems_currents'){
-      return buildCurrentsUrl(tx,ty,tz,curDate);
     }
     // NASA GIBS WMS — single date only (composite handled separately in _draw)
     return buildWmsUrl(cfg.wmsLayer,tx,ty,tz,curDate);
@@ -408,6 +581,7 @@ function draw(){
   if(drawPending)return;
   drawPending=true;
   requestAnimationFrame(function(){drawPending=false;_draw();});
+  currentsRefreshDebounced();
 }
 
 // Get the dates to render for a given layer (3 days if composite mode)
@@ -533,7 +707,7 @@ function _draw(){
   });
 
   LAYERS.forEach(function(cfg,li){
-    if(!cfg.on || cfg.type==='chlor_composite') return;
+    if(!cfg.on || cfg.type==='chlor_composite' || cfg.type==='particles') return;
     var dates=getDatesForLayer(cfg);
     // opacity per layer: divide by number of dates so stacked tiles don't oversaturate
     var tileOpacity = compositeMode && dates.length>1 ? cfg.opacity/dates.length : cfg.opacity;
@@ -558,8 +732,6 @@ function _draw(){
           if(cfg.type==='wms'){
             if(cfg.wmsServer==='imos'){
               url=buildImosUrl(cfg,tx,ty,tz,dateForTile);
-            } else if(cfg.wmsServer==='cmems_currents'){
-              url=buildCurrentsUrl(wx,ty,tz,dateForTile);
             } else {
               url=buildWmsUrl(cfg.wmsLayer,wx,ty,tz,dateForTile);
             }
@@ -784,12 +956,16 @@ window.toggle=function(id){
   var cfg=LAYERS.find(function(c){return c.id===id;});
   cfg.on=!cfg.on;
   if(!cfg.on)tilesEl.querySelectorAll('img[data-k^="'+id+'|"]').forEach(function(i){i.remove();});
+  if(id==='currents'){
+    if(cfg.on)startCurrentsAnim();else stopCurrentsAnim();
+  }
   renderAll();draw();
 };
 window.setOp=function(id,v){
   var cfg=LAYERS.find(function(c){return c.id===id;});
   cfg.opacity=v;
   tilesEl.querySelectorAll('img[data-k^="'+id+'|"]').forEach(function(i){i.style.opacity=v;});
+  if(id==='currents'&&currentsCanvas)currentsCanvas.style.opacity=v;
 };
 window.stepDate=stepDate;
 
