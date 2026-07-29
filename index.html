@@ -181,7 +181,7 @@ var LAYERS = [
   },
   {
     id:'currents', label:'Ocean Currents', sub:'CMEMS · Mercator Ocean model',
-    color:'#ab47bc', on:false, opacity:0.85, maxZ:8, type:'wms', wmsServer:'aodn_currents'
+    color:'#ab47bc', on:false, opacity:0.85, maxZ:8, type:'wms', wmsServer:'cmems_currents'
   },
 ];
 
@@ -401,7 +401,7 @@ function buildUrl(cfg,tx,ty,tz){
     if(cfg.wmsServer==='imos'){
       return buildImosUrl(cfg,tx,ty,tz,curDate);
     }
-    if(cfg.wmsServer==='aodn_currents'){
+    if(cfg.wmsServer==='cmems_currents'){
       return buildCurrentsUrl(tx,ty,tz,curDate);
     }
     // NASA GIBS WMS — single date only (composite handled separately in _draw)
@@ -568,6 +568,8 @@ function _draw(){
           if(cfg.type==='wms'){
             if(cfg.wmsServer==='imos'){
               url=buildImosUrl(cfg,tx,ty,tz,dateForTile);
+            } else if(cfg.wmsServer==='cmems_currents'){
+              url=buildCurrentsUrl(wx,ty,tz,dateForTile);
             } else {
               url=buildWmsUrl(cfg.wmsLayer,wx,ty,tz,dateForTile);
             }
