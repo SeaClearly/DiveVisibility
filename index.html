@@ -135,7 +135,7 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
     <div id="pt-wrap"></div>
     <div class="sec" style="margin-top:auto">
       <div class="slbl">Data Sources</div>
-      <div class="srclist">Esri World Imagery<br>NASA GIBS · MODIS Aqua Chlorophyll<br>NASA GIBS · VIIRS SNPP Chlorophyll<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>AODN geoserver · IMOS OceanCurrent (GSLA)<br>Esri Reference · Place Labels</div>
+      <div class="srclist">Esri World Imagery<br>NASA GIBS · MODIS Aqua Chlorophyll<br>NASA GIBS · VIIRS SNPP Chlorophyll<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>Copernicus Marine (CMEMS) · Ocean Currents<br>Esri Reference · Place Labels</div>
     </div>
   </div>
   <button id="tog">&#9664;</button>
@@ -180,7 +180,7 @@ var LAYERS = [
     url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg'
   },
   {
-    id:'currents', label:'Ocean Currents', sub:'IMOS GSLA · geostrophic velocity',
+    id:'currents', label:'Ocean Currents', sub:'CMEMS · Mercator Ocean model',
     color:'#ab47bc', on:false, opacity:0.85, maxZ:8, type:'wms', wmsServer:'aodn_currents'
   },
 ];
@@ -189,7 +189,7 @@ var LEGENDS = {
   sst:{title:'Sea Surface Temp (C)',desc:'Cold=blue/purple. Warm=red. Cold upwellings often reduce visibility.',grad:'linear-gradient(to right,#0d0060,#0000ff,#00b4ff,#00ffff,#ffff00,#ff8000,#ff0000)',ticks:['<12','16','20','24','>28']},
   chlorophyll:{title:'Chlorophyll-a (mg/m³)',desc:'MODIS + VIIRS + IMOS combined. Blue=clear water. Green/yellow/red=phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
   terra_tc:{title:'Live Satellite (MODIS Terra)',desc:'Raw satellite image. Green/brown water=phytoplankton. White=cloud cover.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#fff)',ticks:['Deep','','','','Cloud']},
-  currents:{title:'Surface Current Speed (m/s)',desc:'IMOS GSLA geostrophic surface velocity, derived from satellite altimetry. Typically ~4 days behind real time - a large-scale offshore picture (eddies, EAC), not fine nearshore detail.',grad:'linear-gradient(to right,#1a237e,#1e88e5,#26c6da,#66bb6a,#fdd835,#f4511e)',ticks:['0','0.25','0.5','0.75','1+']},
+  currents:{title:'Surface Current Speed (m/s)',desc:'Copernicus Marine (CMEMS) Global Ocean Physics model - the same source Windy uses for its currents layer, ~8km resolution, updated multiple times a day.',grad:'linear-gradient(to right,#1a237e,#1e88e5,#26c6da,#66bb6a,#fdd835,#f4511e)',ticks:['0','0.25','0.5','0.75','1+']},
 };
 
 // ── Date ──────────────────────────────────────────────────────
@@ -359,14 +359,28 @@ function buildImosUrl(cfg,tx,ty,tz,date){
 // not on the sandbox's network allowlist and blocks automated fetches), so
 // if it renders blank/wrong once deployed, the layer/style names below are
 // the first thing to double check against AODN's GeoServer.
+// CMEMS (Copernicus Marine Service) WMTS - this is the actual source Windy's
+// currents layer is built on (their "Global Ocean Physics Analysis and
+// Forecast" model from Mercator Ocean, ~8km resolution, updated multiple
+// times a day - much better than the IMOS altimetry layer this replaces).
+// Uses the "merged-uv" quantity so it renders real current vectors
+// (direction + speed), and requests the EPSG:3857 (Web Mercator) tile
+// matrix so tx/ty/tz line up with every other layer in this app.
+// NOTE: unverified from this environment (the domain isn't reachable from
+// the sandbox). If tiles come back blank/404, the first things to check
+// against CMEMS's own docs are: the "EPSG:3857" tile matrix set name (their
+// documented example uses "EPSG:4326", which uses different tile math to
+// everything else here and would need separate handling), and the trailing
+// version suffix on the layer id (Copernicus revs these periodically, e.g.
+// "_202406" - if the plain name below 404s, that's likely why).
 function buildCurrentsUrl(tx,ty,tz,date){
-  var bb=tile2bbox(tx,ty,tz);
-  var bbox=bb.west+','+bb.south+','+bb.east+','+bb.north;
-  return 'https://geoserver-123.aodn.org.au/geoserver/ncwms'+
-    '?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap'+
-    '&LAYERS=gsla_fv02_nrt_timeseries_url/surface_geostrophic_sea_water_velocity'+
-    '&STYLES=&FORMAT=image/png&TRANSPARENT=true&WIDTH=512&HEIGHT=512'+
-    '&SRS=EPSG:4326&BBOX='+bbox+'&TIME='+date;
+  return 'https://wmts.marine.copernicus.eu/teroWmts/'+
+    '?service=WMTS&version=1.0.0&request=GetTile'+
+    '&layer=GLOBAL_ANALYSISFORECAST_PHY_001_024/cmems_mod_glo_phy_anfc_merged-uv_PT1H-i'+
+    '&style=default&format=image/png'+
+    '&tilematrixset=EPSG:3857'+
+    '&tilematrix='+tz+'&tilerow='+ty+'&tilecol='+tx+
+    '&time='+date+'T12:00:00Z';
 }
 
 var V={cx:152.5,cy:-32.5,z:7};
