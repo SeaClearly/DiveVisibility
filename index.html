@@ -135,7 +135,7 @@ input[type=range]{width:100%;accent-color:#4fc3f7;cursor:pointer}
     <div id="pt-wrap"></div>
     <div class="sec" style="margin-top:auto">
       <div class="slbl">Data Sources</div>
-      <div class="srclist">Esri World Imagery<br>NASA GIBS · MODIS Aqua Chlorophyll<br>NASA GIBS · VIIRS SNPP Chlorophyll<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>NOAA/Navy HYCOM · Animated Currents<br>Esri Reference · Place Labels</div>
+      <div class="srclist">Esri World Imagery<br>NASA GIBS · MODIS Aqua Chlorophyll<br>NASA GIBS · VIIRS SNPP Chlorophyll<br>IMOS THREDDS · Australian coastal<br>GHRSST MUR SST (gap-filled)<br>NOAA CoastWatch · Animated Currents<br>Esri Reference · Place Labels</div>
     </div>
   </div>
   <button id="tog">&#9664;</button>
@@ -180,7 +180,7 @@ var LAYERS = [
     url:'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg'
   },
   {
-    id:'currents', label:'Ocean Currents', sub:'HYCOM · animated · ~8km',
+    id:'currents', label:'Ocean Currents', sub:'NOAA CoastWatch · animated · ~25km',
     color:'#ab47bc', on:false, opacity:0.85, maxZ:8, type:'particles'
   },
 ];
@@ -189,7 +189,7 @@ var LEGENDS = {
   sst:{title:'Sea Surface Temp (C)',desc:'Cold=blue/purple. Warm=red. Cold upwellings often reduce visibility.',grad:'linear-gradient(to right,#0d0060,#0000ff,#00b4ff,#00ffff,#ffff00,#ff8000,#ff0000)',ticks:['<12','16','20','24','>28']},
   chlorophyll:{title:'Chlorophyll-a (mg/m³)',desc:'MODIS + VIIRS + IMOS combined. Blue=clear water. Green/yellow/red=phytoplankton=lower vis. Gaps=cloud cover.',grad:'linear-gradient(to right,#0a0a5e,#0040ff,#00c0ff,#00ff80,#ffff00,#ff8000,#ff0000)',ticks:['0.01','0.1','1','10','60']},
   terra_tc:{title:'Live Satellite (MODIS Terra)',desc:'Raw satellite image. Green/brown water=phytoplankton. White=cloud cover.',grad:'linear-gradient(to right,#001a33,#003366,#006699,#3399cc,#cceeff,#fff)',ticks:['Deep','','','','Cloud']},
-  currents:{title:'Surface Current (white streaks)',desc:'HYCOM (NOAA/US Navy) global ocean model, ~8km resolution, updated daily. Streak direction = flow direction. Brighter + thicker = faster current. Kept white (not color-coded) so it doesn\u2019t distort chlorophyll\u2019s own color scale when both are on.',grad:'linear-gradient(to right,rgba(255,255,255,.15),rgba(255,255,255,.4),rgba(255,255,255,.7),#fff)',ticks:['Slow','','','Fast']},
+  currents:{title:'Surface Current (white streaks)',desc:'NOAA CoastWatch altimetry-derived geostrophic currents, ~25km resolution, updated daily. Streak direction = flow direction. Brighter + thicker = faster current. Kept white (not color-coded) so it doesn\u2019t distort chlorophyll\u2019s own color scale when both are on.',grad:'linear-gradient(to right,rgba(255,255,255,.15),rgba(255,255,255,.4),rgba(255,255,255,.7),#fff)',ticks:['Slow','','','Fast']},
 };
 
 // ── Date ──────────────────────────────────────────────────────
@@ -361,28 +361,34 @@ var mapInteract=document.getElementById('map-interact');
 function W(){return mwrap.clientWidth;}
 function H(){return mwrap.clientHeight;}
 
-// ── Animated Ocean Currents (HYCOM) ──────────────────────────────
+// ── Animated Ocean Currents (NOAA CoastWatch Blended NRT Currents) ──
 // Windy's current arrows/streaks are an actual particle animation driven by
 // raw numeric velocity data - not something a static image tile can do.
 // CMEMS (the model Windy uses) only gives out raw numbers to logged-in
-// accounts, so this uses HYCOM instead: the US Navy/NOAA global ocean
-// model, similar ~8km resolution, public domain, served with no login via
-// NOAA's ERDDAP service in plain JSON. NOTE: not live-tested from this
-// sandbox (ncei.noaa.gov isn't on its network allowlist) - if the layer
-// loads with zero particles, open the Network tab, filter "ncei.noaa.gov",
-// and send back whatever JSON/error comes back so the dataset id/params
-// below can be corrected against it.
+// accounts. The first free alternative tried here was HYCOM/GOFS 3.1 - but
+// that model was decommissioned in Sept 2024 (confirmed via its own THREDDS
+// catalog metadata), so every request to it failed. This uses NOAA
+// CoastWatch's "Blended NRT Currents" instead: altimetry-derived geostrophic
+// surface currents, ~0.25° (~25km) resolution, confirmed still actively
+// updated daily (its own metadata is self-tagged "testOutOfDate: now-2days").
+// It's coarser than the ~8km CMEMS/HYCOM tier originally aimed for, but it's
+// real, live data with no login - direction + relative speed still read
+// correctly, just at a broader scale (ocean-basin eddies/currents, not
+// street-level detail). NOTE: not live-tested from this sandbox
+// (coastwatch.noaa.gov isn't on its network allowlist) - if particles never
+// appear, open the Network tab, filter "coastwatch.noaa.gov", and send back
+// whatever comes back.
 var currentsField=null, currentsParticles=[], currentsAnimId=null;
 var currentsCanvas=null, currentsCtx=null, currentsFetchTimer=null;
 var CURRENTS_N=1000;
 
-function buildHycomUrl(bbox,date){
-  var t=date+'T12:00:00Z';
+function buildCurrentsDataUrl(bbox,date){
+  var t=date+'T00:00:00Z';
   var latQ='('+bbox.south.toFixed(2)+'):('+bbox.north.toFixed(2)+')';
   var lonQ='('+bbox.west.toFixed(2)+'):('+bbox.east.toFixed(2)+')';
-  return 'https://www.ncei.noaa.gov/erddap/griddap/Hycom_sfc_3d.json'+
-    '?water_u[('+t+')][(0.0)]'+'['+latQ+']['+lonQ+'],'+
-    'water_v[('+t+')][(0.0)]'+'['+latQ+']['+lonQ+']';
+  return 'https://coastwatch.noaa.gov/erddap/griddap/noaacwBLENDEDNRTcurrentsDaily.json'+
+    '?u_current[('+t+')]'+'['+latQ+']['+lonQ+'],'+
+    'v_current[('+t+')]'+'['+latQ+']['+lonQ+']';
 }
 
 function currentsVisibleBbox(){
@@ -395,10 +401,10 @@ function currentsVisibleBbox(){
   return {west:west,east:east,north:Math.min(north,89),south:Math.max(south,-89)};
 }
 
-function parseHycomJson(data){
+function parseCurrentsJson(data){
   var rows=data.table.rows, cols=data.table.columnNames;
   var iLat=cols.indexOf('latitude'), iLon=cols.indexOf('longitude'),
-      iU=cols.indexOf('water_u'), iV=cols.indexOf('water_v');
+      iU=cols.indexOf('u_current'), iV=cols.indexOf('v_current');
   var latSet={},lonSet={};
   rows.forEach(function(r){latSet[r[iLat]]=1;lonSet[r[iLon]]=1;});
   var latArr=Object.keys(latSet).map(Number).sort(function(a,b){return a-b;});
@@ -471,16 +477,29 @@ function seedCurrentsParticles(){
 function loadCurrentsField(){
   var cfg=LAYERS.find(function(c){return c.id==='currents';});
   if(!cfg||!cfg.on)return;
-  var url=buildHycomUrl(currentsVisibleBbox(),curDate);
+  var bbox=currentsVisibleBbox();
+  tryLoadCurrentsDate(bbox,curDate,0);
+}
+
+// This dataset typically lags ~2 days behind today; rather than just
+// failing on whatever date is currently selected in the app, step back a
+// few days until data is actually available for it.
+function tryLoadCurrentsDate(bbox,date,attempt){
+  var url=buildCurrentsDataUrl(bbox,date);
   fetch(url).then(function(r){
-    if(!r.ok)throw new Error('HYCOM HTTP '+r.status);
+    if(!r.ok)throw new Error('Currents HTTP '+r.status);
     return r.json();
   }).then(function(data){
-    currentsField=parseHycomJson(data);
+    currentsField=parseCurrentsJson(data);
     seedCurrentsParticles();
   }).catch(function(err){
-    console.warn('Currents field failed to load:',err);
-    currentsField=null;
+    if(attempt<5){
+      var d=new Date(date);d.setDate(d.getDate()-1);
+      tryLoadCurrentsDate(bbox,fmtDate(d),attempt+1);
+    } else {
+      console.warn('Currents field failed to load:',err);
+      currentsField=null;
+    }
   });
 }
 
