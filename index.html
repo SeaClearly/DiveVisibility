@@ -383,12 +383,15 @@ var currentsCanvas=null, currentsCtx=null, currentsFetchTimer=null;
 var CURRENTS_N=1000;
 
 function buildCurrentsDataUrl(bbox,date){
-  var t=date+'T00:00:00Z';
-  var latQ='('+bbox.south.toFixed(2)+'):('+bbox.north.toFixed(2)+')';
-  var lonQ='('+bbox.west.toFixed(2)+'):('+bbox.east.toFixed(2)+')';
-  return 'https://coastwatch.noaa.gov/erddap/griddap/noaacwBLENDEDNRTcurrentsDaily.json'+
-    '?u_current[('+t+')]'+'['+latQ+']['+lonQ+'],'+
-    'v_current[('+t+')]'+'['+latQ+']['+lonQ+']';
+  // Routed through the same Cloudflare Worker proxy used for chlorophyll -
+  // NOAA's ERDDAP server returns valid data (confirmed HTTP 200) but doesn't
+  // send an Access-Control-Allow-Origin header, so the browser blocks it
+  // when called directly. The proxy fetches it server-side (no CORS rules
+  // apply there) and adds the header back on the way out.
+  return 'https://divevis-proxy.supaskua217.workers.dev/'+
+    '?mode=currents&date='+date+
+    '&south='+bbox.south.toFixed(2)+'&north='+bbox.north.toFixed(2)+
+    '&west='+bbox.west.toFixed(2)+'&east='+bbox.east.toFixed(2);
 }
 
 function currentsVisibleBbox(){
