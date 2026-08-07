@@ -352,6 +352,49 @@ function buildImosUrl(cfg,tx,ty,tz,date){
     '&COLORSCALERANGE=0.01,10&LOGSCALE=true';
 }
 
+// NASA GIBS' own land/water mask, same EPSG:3857 tile grid as everything
+// else here (static - no date). Applied as a CSS mask on chlorophyll tiles
+// so chlorophyll only ever shows over water, never spilling onto land
+// underneath, regardless of how coarse/misaligned the source pixels are.
+// NOTE: could not visually confirm from this sandbox which region of the
+// mask is opaque (land or water) - if chlorophyll ends up showing ONLY
+// over land once deployed (backwards), flip LAND_MASK_INVERT to true below.
+var LAND_MASK_INVERT=false;
+function buildLandMaskUrl(wx,ty,tz){
+  return 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/std/OSM_Land_Water_Map/default/GoogleMapsCompatible_Level9/'+tz+'/'+ty+'/'+wx+'.png';
+}
+
+// Produces an alpha-inverted version of a mask tile (used only if
+// LAND_MASK_INVERT is true). Falls back to the original URL if the browser
+// blocks per-pixel canvas access on this cross-origin image, in which case
+// the mask would just apply un-inverted rather than break entirely.
+var maskInvertCache={};
+function getInvertedMaskUrl(url,cb){
+  if(maskInvertCache[url]){cb(maskInvertCache[url]);return;}
+  var img=new Image();
+  img.crossOrigin='anonymous';
+  img.onload=function(){
+    try{
+      var c=document.createElement('canvas');
+      c.width=img.naturalWidth;c.height=img.naturalHeight;
+      var ctx=c.getContext('2d');
+      ctx.drawImage(img,0,0);
+      var id=ctx.getImageData(0,0,c.width,c.height);
+      var d=id.data;
+      for(var i=3;i<d.length;i+=4)d[i]=255-d[i];
+      ctx.putImageData(id,0,0);
+      var durl=c.toDataURL();
+      maskInvertCache[url]=durl;
+      cb(durl);
+    }catch(e){
+      maskInvertCache[url]=url; // CORS-blocked - fall back to un-inverted
+      cb(url);
+    }
+  };
+  img.onerror=function(){cb(url);};
+  img.src=url;
+}
+
 
 var V={cx:152.5,cy:-32.5,z:7};
 var TS=256,drag=false,ds=null,dv=null,sideOpen=true;
@@ -730,6 +773,14 @@ function _draw(){
               img.onerror=function(){this.style.display='none';loadDone();};
               img.src=url;
               tilesEl.appendChild(img);
+              var maskRawUrl=buildLandMaskUrl(wx,ty,tz);
+              var applyMask=function(maskUrl){
+                var mc='-webkit-mask-image:url('+maskUrl+');mask-image:url('+maskUrl+');'+
+                  '-webkit-mask-size:100% 100%;mask-size:100% 100%;';
+                img.style.cssText+=mc;
+              };
+              if(LAND_MASK_INVERT)getInvertedMaskUrl(maskRawUrl,applyMask);
+              else applyMask(maskRawUrl);
             }
           }
         }
